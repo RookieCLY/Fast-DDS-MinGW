@@ -23,11 +23,13 @@
 #include <bitset>
 #include <vector>
 
+#include <fastdds/dds/core/detail/DDSReturnCode.hpp>
 #include <fastdds/dds/core/policy/ParameterTypes.hpp>
 #include <fastdds/dds/core/Types.hpp>
 #include <fastdds/dds/xtypes/type_representation/detail/dds_xtypes_typeobject.hpp>
 #include <fastdds/rtps/attributes/ExternalLocators.hpp>
 #include <fastdds/rtps/attributes/PropertyPolicy.hpp>
+#include <fastdds/rtps/attributes/ResourceManagement.hpp>
 #include <fastdds/rtps/attributes/RTPSParticipantAllocationAttributes.hpp>
 #include <fastdds/rtps/attributes/RTPSParticipantAttributes.hpp>
 #include <fastdds/rtps/attributes/ThreadSettings.hpp>
@@ -35,7 +37,6 @@
 #include <fastdds/rtps/common/Time_t.hpp>
 #include <fastdds/rtps/common/Types.hpp>
 #include <fastdds/rtps/flowcontrol/FlowControllerConsts.hpp>
-#include <fastdds/rtps/attributes/ResourceManagement.hpp>
 #include <fastdds/rtps/transport/network/NetmaskFilterKind.hpp>
 
 #include <fastdds/utils/collections/ResourceLimitedVector.hpp>
@@ -105,6 +106,7 @@ using PolicyMask = std::bitset<NEXT_QOS_POLICY_ID>;
 /**
  * Class QosPolicy, base for all QoS policies defined for Writers and Readers.
  */
+FASTDDS_TODO_BEFORE(4, 0, "Remove 'hasChanged' and 'send_always_' as they were replaced by 'should_be_sent'.");
 class QosPolicy
 {
 public:
@@ -1727,27 +1729,27 @@ public:
      * @brief Specifies the maximum number of data-samples the DataWriter (or DataReader) can manage across all the
      * instances associated with it. Represents the maximum samples the middleware can store for any one DataWriter
      * (or DataReader). <br>
-     * Value less or equal to 0 means infinite resources. By default, 5000.
+     * Value less or equal to 0 means infinite resources. By default, LENGTH_UNLIMITED.
      *
      * @warning It is inconsistent if `max_samples < (max_instances * max_samples_per_instance)`.
      */
     int32_t max_samples;
     /**
      * @brief Represents the maximum number of instances DataWriter (or DataReader) can manage. <br>
-     * Value less or equal to 0 means infinite resources. By default, 10.
+     * Value less or equal to 0 means infinite resources. By default, LENGTH_UNLIMITED.
      *
      * @warning It is inconsistent if `(max_instances * max_samples_per_instance) > max_samples`.
      */
     int32_t max_instances;
     /**
      * @brief Represents the maximum number of samples of any one instance a DataWriter(or DataReader) can manage. <br>
-     * Value less or equal to 0 means infinite resources. By default, 400.
+     * Value less or equal to 0 means infinite resources. By default, LENGTH_UNLIMITED.
      *
      * @warning It is inconsistent if `(max_instances * max_samples_per_instance) > max_samples`.
      */
     int32_t max_samples_per_instance;
     /**
-     * @brief Number of samples currently allocated. <br>
+     * @brief Number of samples initially allocated. <br>
      * By default, 100.
      */
     int32_t allocated_samples;
@@ -1761,11 +1763,11 @@ public:
      * @brief Constructor
      */
     FASTDDS_EXPORTED_API ResourceLimitsQosPolicy()
-        : Parameter_t(PID_RESOURCE_LIMITS, 4 + 4 + 4)
+        : Parameter_t(PID_RESOURCE_LIMITS, 4 * 5)
         , QosPolicy(false)
-        , max_samples(5000)
-        , max_instances(10)
-        , max_samples_per_instance(400)
+        , max_samples(LENGTH_UNLIMITED)
+        , max_instances(LENGTH_UNLIMITED)
+        , max_samples_per_instance(LENGTH_UNLIMITED)
         , allocated_samples(100)
         , extra_samples(1)
     {
@@ -1982,8 +1984,6 @@ public:
 /**
  * This policy is a hint to the infrastructure as to how to set the priority of the underlying transport used to send the data.
  *
- * @warning This QosPolicy can be defined and is transmitted to the rest of the network but is not implemented in this version.
- *
  * @note Mutable Qos Policy
  */
 class TransportPriorityQosPolicy : public Parameter_t, public QosPolicy
@@ -1991,7 +1991,7 @@ class TransportPriorityQosPolicy : public Parameter_t, public QosPolicy
 public:
 
     //!Priority <br> By default, 0.
-    uint32_t value;
+    int32_t value;
 
     /**
      * @brief Constructor
@@ -2664,6 +2664,7 @@ public:
     FASTDDS_EXPORTED_API WireProtocolConfigQos()
         : QosPolicy(false)
         , participant_id(-1)
+        , easy_mode_("")
     {
     }
 
@@ -2683,6 +2684,7 @@ public:
                (this->default_multicast_locator_list == b.default_multicast_locator_list) &&
                (this->default_external_unicast_locators == b.default_external_unicast_locators) &&
                (this->ignore_non_matching_locators == b.ignore_non_matching_locators) &&
+               (this->easy_mode_ == b.easy_mode()) &&
                QosPolicy::operator ==(b);
     }
 
@@ -2725,6 +2727,53 @@ public:
      * Whether locators that don't match with the announced locators should be kept.
      */
     bool ignore_non_matching_locators = false;
+
+    /**
+     * @brief Setter for ROS 2 Easy Mode IP
+     *
+     * @param ip IP address to set
+     *
+     * @note The IP address must be an IPv4 address. If it is not, the IP address will not be set.
+     *
+     * @return RETCODE_OK if the IP address is set, an specific error code otherwise:
+     * @return RETCODE_BAD_PARAMETER if the IP address is not an IPv4 address.
+     *
+     */
+    ReturnCode_t easy_mode(
+            const std::string& ip)
+    {
+        // Check if the input is empty
+        if (!ip.empty())
+        {
+            // Check if the input is a valid IP
+            if (!rtps::IPLocator::isIPv4(ip))
+            {
+                EPROSIMA_LOG_ERROR(
+                    WIREPROTOCOLQOS, "Invalid IP address format for ROS 2 Easy Mode. It must be an IPv4 address.");
+
+                return RETCODE_BAD_PARAMETER;
+            }
+        }
+
+        easy_mode_ = ip;
+
+        return RETCODE_OK;
+    }
+
+    /**
+     * @brief Getter for ROS 2 Easy Mode IP
+     *
+     * @return IP address if set, empty string otherwise
+     */
+    const std::string& easy_mode() const
+    {
+        return easy_mode_;
+    }
+
+private:
+
+    //! ROS 2 Easy Mode IP
+    std::string easy_mode_;
 };
 
 //! Qos Policy to configure the transport layer
@@ -2802,6 +2851,7 @@ public:
 };
 
 //! Qos Policy to configure the endpoint
+FASTDDS_TODO_BEFORE(4, 0, "Make all eProsima extended QoS inherit from Parameter_t and QosPolicy if possible.");
 class RTPSEndpointQos
 {
 public:
@@ -2809,6 +2859,12 @@ public:
     FASTDDS_EXPORTED_API RTPSEndpointQos() = default;
 
     virtual FASTDDS_EXPORTED_API ~RTPSEndpointQos() = default;
+
+    inline void clear()
+    {
+        RTPSEndpointQos reset = RTPSEndpointQos();
+        std::swap(*this, reset);
+    }
 
     bool operator ==(
             const RTPSEndpointQos& b) const
@@ -2867,6 +2923,12 @@ public:
      * @brief Destructor
      */
     virtual FASTDDS_EXPORTED_API ~WriterResourceLimitsQos() = default;
+
+    inline void clear()
+    {
+        WriterResourceLimitsQos reset = WriterResourceLimitsQos();
+        std::swap(*this, reset);
+    }
 
     bool operator ==(
             const WriterResourceLimitsQos& b) const

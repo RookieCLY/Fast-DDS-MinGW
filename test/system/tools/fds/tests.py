@@ -41,6 +41,7 @@
         test_fast_discovery_several_server_ids,
         test_fast_discovery_invalid_locator,
         test_fast_discovery_non_existent_profile,
+        test_fast_discovery_tcp_via_XML,
 
 """
 
@@ -51,6 +52,9 @@ import time
 import signal
 import os
 from enum import Enum
+
+if os.name == 'nt':
+    import ctypes
 
 from xml.dom import minidom
 
@@ -85,17 +89,27 @@ def signal_handler(signum, frame):
 def send_command(command):
     print("Executing command: " + str(command))
 
-    # this subprocess cannot be executed in shell=True or using bash
+    creationflags = 0
+    if os.name == 'nt':
+        # Give the child its own console so we can deliver CTRL_C_EVENT to
+        # it without also affecting the launcher (PowerShell). We cannot use
+        # Start-Process -WindowStyle Hidden on Windows containers, and
+        # CREATE_NEW_PROCESS_GROUP + CTRL_BREAK_EVENT does not work either
+        # because the server only installs a SIGINT handler, not SIGBREAK.
+        creationflags = subprocess.CREATE_NEW_CONSOLE
+
+    # This subprocess cannot be executed in shell=True or using bash
     #  because a background script will not broadcast the signals
     #  it receives
     proc = subprocess.Popen(command,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
-                            universal_newlines=True
+                            universal_newlines=True,
+                            creationflags=creationflags,
                             )
 
-    # sleep to let the server run
-    time.sleep(1)
+    # Sleep to let the server run
+    time.sleep(3)
 
     # 1. An exit code of 0 means everything was alright
     # 2. An exit code of 1 means the tool's process terminated before even
@@ -105,17 +119,44 @@ def send_command(command):
     #    output was different than expected
     exit_code = 0
 
-    # direct this script to ignore SIGINT
+    # If the process already exited due to failure (e.g. bad arguments, missing XML),
+    # skip signalling entirely and collect the output.
+    if proc.poll() is not None:
+        output, err = proc.communicate()
+        return output, err, exit_code
+
+    # Direct this script to ignore SIGINT
     signal.signal(signal.SIGINT, signal_handler)
 
-    # send SIGINT to process and wait for processing
+    # On Windows, detach from the launcher's console and attach to the child's brand-new
+    # console. From that attached state, GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)
+    # broadcasts CTRL+C to every process in the attached console. This reaches the server's
+    # SIGINT handler and triggers the clean-shutdown path (which prints "### Server shut down ###")
+    # without leaking the signal to PowerShell.
+    kernel32 = None
+    if os.name == 'nt':
+        kernel32 = ctypes.windll.kernel32
+        ATTACH_PARENT_PROCESS = -1
+        CTRL_C_EVENT = 0
+        kernel32.FreeConsole()
+        if not kernel32.AttachConsole(proc.pid):
+            # Restore our console and bail out hard if the attached failed
+            kernel32.AttachConsole(ATTACH_PARENT_PROCESS)
+            proc.kill()
+            print('Could not attach to child console to send CTRL_C')
+            sys.exit(2)
+        # Ignore CTRL+C in our own process so the broadcast does not terminate the Python launcher.
+        kernel32.SetConsoleCtrlHandler(None, True)
+
+    # Send signal to process and wait for processing
     lease = 0
     while True:
 
         if os.name == 'posix':
             proc.send_signal(signal.SIGINT)
         elif os.name == 'nt':
-            proc.send_signal(signal.CTRL_C_EVENT)
+            # pid == 0 targets all processes attached to our (the child's) console.
+            kernel32.GenerateConsoleCtrlEvent(0, 0)
 
         time.sleep(1)
         lease += 1
@@ -125,6 +166,12 @@ def send_command(command):
             print('iterating...')
         else:
             break
+
+    # Restore the launcher's console attachment on Windows before returning.
+    if os.name == 'nt':
+        kernel32.FreeConsole()
+        kernel32.AttachConsole(-1)  # ATTACH_PARENT_PROCESS
+        kernel32.SetConsoleCtrlHandler(None, False)
 
     # Check whether SIGINT was able to terminate the process
     if proc.poll() is None:
@@ -613,29 +660,16 @@ def test_fast_discovery_security_disabled(fast_discovery_tool):
     exit_code = check_output(output, err, EXPECTED_OUTPUT, True, False)
     sys.exit(exit_code)
 
-def test_fast_discovery_security_enabled_xml_prefix(fast_discovery_tool):
-    """Test failure when the printed guid is not the specified in the XML file"""
+def test_fast_discovery_tcp_via_XML(fast_discovery_tool):
+    """Test TCP transport loaded via XML configuration"""
 
-    XML_file_path = "test_xml_secure_discovery_server_profile.xml"
+    XML_file_path = "test_xml_discovery_server_tcp.xml"
     command = [fast_discovery_tool, str(command_to_int_test[Command_test.SERVER]), '-x', XML_file_path]
     output, err, exit_code = send_command(command)
     if exit_code != 0:
         print(output)
         sys.exit(exit_code)
-    EXPECTED_OUTPUT = "UDPv4:[127.0.0.1]:32823"
-    exit_code = check_output(output, err, EXPECTED_OUTPUT, False, False)
-    sys.exit(exit_code)
-
-def test_fast_discovery_security_enabled_cli_prefix(fast_discovery_tool):
-    """Test failure when the printed guid is not the specified in the XML file"""
-
-    XML_file_path = "test_xml_secure_discovery_server_profile.xml"
-    command = [fast_discovery_tool, str(command_to_int_test[Command_test.SERVER]), '-i', '0', '-x', 'secure_ds_no_prefix@' + XML_file_path]
-    output, err, exit_code = send_command(command)
-    if exit_code != 0:
-        print(output)
-        sys.exit(exit_code)
-    EXPECTED_OUTPUT = "UDPv4:[127.0.0.1]:32823"
+    EXPECTED_OUTPUT = "TCPv4:[127.0.0.1]:12345-12345"
     exit_code = check_output(output, err, EXPECTED_OUTPUT, False, False)
     sys.exit(exit_code)
 
@@ -690,10 +724,8 @@ if __name__ == '__main__':
             test_fast_discovery_non_existent_profile(args.binary_path),
         'test_fast_discovery_security_disabled': lambda:
             test_fast_discovery_security_disabled(args.binary_path),
-        'test_fast_discovery_security_enabled_xml_prefix': lambda:
-            test_fast_discovery_security_enabled_xml_prefix(args.binary_path),
-        'test_fast_discovery_security_enabled_cli_prefix': lambda:
-            test_fast_discovery_security_enabled_cli_prefix(args.binary_path)
+        'test_fast_discovery_tcp_via_XML': lambda:
+            test_fast_discovery_tcp_via_XML(args.binary_path)
     }
 
     tests[args.test_name]()

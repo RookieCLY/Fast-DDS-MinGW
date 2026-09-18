@@ -123,7 +123,8 @@ static void wait_statistics(
             total_samples += info_seq.length();
             reader->return_loan(data_seq, info_seq);
         }
-    } while (total_samples < num_samples);
+    }
+    while (total_samples < num_samples);
 
     std::cout << "Received " << total_samples << " samples on " << topic_name << std::endl;
 }
@@ -159,19 +160,22 @@ void test_discovery_topic_physical_data(
                             <propertiesPolicy>\
                                 <properties>\
                                     <property>\
-                                        <name>" + std::string(parameter_policy_physical_data_host) +
+                                        <name>"
+                + std::string(parameter_policy_physical_data_host) +
                 "</name>\
                                         <value>" + user_defined_host +
                 "</value>\
                                     </property>\
                                     <property>\
-                                        <name>" + std::string(parameter_policy_physical_data_user) +
+                                        <name>"
+                + std::string(parameter_policy_physical_data_user) +
                 "</name>\
                                         <value>" + user_defined_user +
                 "</value>\
                                     </property>\
                                     <property>\
-                                        <name>" + std::string(parameter_policy_physical_data_process) +
+                                        <name>"
+                + std::string(parameter_policy_physical_data_process) +
                 "</name>\
                                         <value>" + user_defined_process +
                 "</value>\
@@ -746,7 +750,8 @@ TEST(DDSStatistics, correct_deletion_upon_delete_contained_entities)
         auto reader =
                 std::make_shared<CustomStatisticsParticipantSubscriber>(TEST_TOPIC_NAME + std::to_string(topic_number));
 
-        std::shared_ptr<std::list<HelloWorld>> data = std::make_shared<std::list<HelloWorld>>(default_helloworld_data_generator(
+        std::shared_ptr<std::list<HelloWorld>> data =
+                std::make_shared<std::list<HelloWorld>>(default_helloworld_data_generator(
                             10));
 
         threads.emplace_back(std::make_shared<std::thread>([reader, data]()

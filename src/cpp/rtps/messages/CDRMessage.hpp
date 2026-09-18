@@ -22,6 +22,7 @@
 
 #include <fastcdr/cdr/fixed_size_string.hpp>
 
+#include <fastdds/rtps/attributes/ExternalLocators.hpp>
 #include <fastdds/rtps/common/CDRMessage_t.hpp>
 #include <fastdds/rtps/common/Property.hpp>
 #include <fastdds/rtps/common/BinaryProperty.hpp>
@@ -30,6 +31,9 @@
 #include <fastdds/rtps/common/SampleIdentity.hpp>
 #include <fastdds/rtps/common/Time_t.hpp>
 #include <fastdds/rtps/common/Locator.hpp>
+#include <fastdds/rtps/common/LocatorList.hpp>
+#include <fastdds/rtps/common/LocatorWithMask.hpp>
+#include <fastdds/utils/collections/ResourceLimitedContainerConfig.hpp>
 
 #include <rtps/security/common/ParticipantGenericMessage.h>
 
@@ -65,16 +69,6 @@ bool readData(
         octet* o,
         uint32_t length);
 
-bool read_array_with_max_size(
-        CDRMessage_t* msg,
-        octet* arr,
-        size_t max_size);
-
-bool readDataReversed(
-        CDRMessage_t* msg,
-        octet* o,
-        uint32_t length);
-
 bool readInt32(
         CDRMessage_t* msg,
         int32_t* lo);
@@ -103,9 +97,23 @@ bool readUInt16(
         CDRMessage_t* msg,
         uint16_t* i16);
 
-bool readLocator(
+bool read_locator(
         CDRMessage_t* msg,
         Locator_t* loc);
+
+bool read_locator_list(
+        CDRMessage_t* msg,
+        LocatorList* loc_list);
+
+bool read_external_locator(
+        CDRMessage_t* msg,
+        LocatorWithMask* loc,
+        uint8_t* externality,
+        uint8_t* cost);
+
+bool read_external_locator_list(
+        CDRMessage_t* msg,
+        ExternalLocators* external_locators);
 
 bool readOctet(
         CDRMessage_t* msg,
@@ -122,11 +130,11 @@ bool readTimestamp(
         CDRMessage_t* msg,
         Time_t* ts);
 
-bool readString(
+bool read_string(
         CDRMessage_t* msg,
         std::string* p_str);
 
-bool readString(
+bool read_string(
         CDRMessage_t* msg,
         fastcdr::string_255* stri);
 
@@ -144,18 +152,15 @@ bool readBinaryProperty(
 
 bool readPropertySeq(
         CDRMessage_t* msg,
-        PropertySeq& properties,
-        const uint32_t parameter_length);
+        PropertySeq& properties);
 
 bool readBinaryPropertySeq(
         CDRMessage_t* msg,
-        BinaryPropertySeq& binary_properties,
-        const uint32_t parameter_length);
+        BinaryPropertySeq& binary_properties);
 
 bool readDataHolder(
         CDRMessage_t* msg,
-        DataHolder& data_holder,
-        const uint32_t parameter_length);
+        DataHolder& data_holder);
 
 bool readDataHolderSeq(
         CDRMessage_t* msg,
@@ -168,6 +173,15 @@ bool readMessageIdentity(
 bool readParticipantGenericMessage(
         CDRMessage_t* msg,
         security::ParticipantGenericMessage& message);
+
+bool read_resource_limited_container_config(
+        CDRMessage_t* msg,
+        ResourceLimitedContainerConfig& config);
+
+bool read_duration_t(
+        CDRMessage_t* msg,
+        dds::Duration_t& duration);
+
 ///@}
 
 
@@ -271,9 +285,23 @@ bool addFragmentNumberSet(
         CDRMessage_t* msg,
         FragmentNumberSet_t* fns);
 
-bool addLocator(
+bool add_locator(
         CDRMessage_t* msg,
         const Locator_t& loc);
+
+bool add_locator_list(
+        CDRMessage_t* msg,
+        const LocatorList& loc_list);
+
+bool add_external_locator(
+        CDRMessage_t* msg,
+        const LocatorWithMask& loc,
+        const uint8_t& externality,
+        const uint8_t& cost);
+
+bool add_external_locator_list(
+        CDRMessage_t* msg,
+        const ExternalLocators& external_locators);
 
 bool add_string(
         CDRMessage_t* msg,
@@ -332,6 +360,13 @@ bool addParticipantGenericMessage(
         CDRMessage_t* msg,
         const security::ParticipantGenericMessage& message);
 
+bool add_resource_limited_container_config(
+        CDRMessage_t* msg,
+        const ResourceLimitedContainerConfig& config);
+
+bool add_duration_t(
+        CDRMessage_t* msg,
+        const dds::Duration_t& duration);
 ///@}
 
 /**

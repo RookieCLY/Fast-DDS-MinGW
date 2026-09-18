@@ -23,7 +23,7 @@
 
 #include <fastdds/builtin/type_lookup_service/TypeLookupManager.hpp>
 #include <rtps/participant/RTPSParticipantImpl.hpp>
-#include <rtps/RTPSDomainImpl.hpp>
+#include <rtps/domain/RTPSDomainImpl.hpp>
 #include <rtps/reader/StatefulReader.hpp>
 
 using eprosima::fastdds::rtps::RTPSReader;
@@ -112,7 +112,7 @@ void TypeLookupRequestListener::start_request_processor_thread()
                 };
         // Create and start the processing thread
         request_processor_thread = eprosima::create_thread(thread_func,
-                        typelookup_manager_->participant_->get_attributes().typelookup_service_thread,
+                        typelookup_manager_->participant_->get_const_attributes().typelookup_service_thread,
                         "dds.tls.requests.%u");
     }
 }

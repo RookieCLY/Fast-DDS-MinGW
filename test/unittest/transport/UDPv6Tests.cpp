@@ -264,7 +264,7 @@ TEST_F(UDPv6Tests, send_and_receive_between_ports)
                     Locators locators_begin(locator_list.begin());
                     Locators locators_end(locator_list.end());
                     sent |= send_resource->send(buffer_list, 5, &locators_begin, &locators_end,
-                                    (std::chrono::steady_clock::now() + std::chrono::microseconds(100)));
+                                    (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0);
                     if (sent)
                     {
                         break;
@@ -277,6 +277,7 @@ TEST_F(UDPv6Tests, send_and_receive_between_ports)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
     senderThread->join();
     sem.wait();
+    msg_recv->setCallback(nullptr);
 }
 
 TEST_F(UDPv6Tests, send_to_loopback)
@@ -329,7 +330,7 @@ TEST_F(UDPv6Tests, send_to_loopback)
                     Locators locators_begin(locator_list.begin());
                     Locators locators_end(locator_list.end());
                     sent |= send_resource->send(buffer_list, 5, &locators_begin, &locators_end,
-                                    (std::chrono::steady_clock::now() + std::chrono::microseconds(100)));
+                                    (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0);
                     if (sent)
                     {
                         break;
@@ -342,6 +343,7 @@ TEST_F(UDPv6Tests, send_to_loopback)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
     senderThread->join();
     sem.wait();
+    msg_recv->setCallback(nullptr);
 }
 #endif // ifndef __APPLE__
 
@@ -372,7 +374,7 @@ TEST_F(UDPv6Tests, send_is_rejected_if_buffer_size_is_bigger_to_size_specified_i
     std::vector<NetworkBuffer> buffer_list;
     buffer_list.emplace_back(receiveBufferWrongSize.data(), (uint32_t)receiveBufferWrongSize.size());
     ASSERT_FALSE(send_resource_list.at(0)->send(buffer_list, (uint32_t)receiveBufferWrongSize.size(),
-            &locators_begin, &locators_end, (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+            &locators_begin, &locators_end, (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
 }
 
 TEST_F(UDPv6Tests, RemoteToMainLocal_simply_strips_out_address_leaving_IP_ANY)
@@ -445,7 +447,7 @@ TEST_F(UDPv6Tests, send_to_wrong_interface)
     }
     ASSERT_FALSE(send_resource_list.at(0)->send(buffer_list, (uint32_t)message.size(), &locators_begin,
             &locators_end,
-            (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+            (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
 }
 
 TEST_F(UDPv6Tests, send_to_blocked_interface)
@@ -512,7 +514,7 @@ TEST_F(UDPv6Tests, send_to_allowed_interface)
             }
             ASSERT_TRUE(send_resource_list.at(0)->send(buffer_list, (uint32_t)message.size(),
                     &locators_begin, &locators_end,
-                    (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+                    (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
         }
     }
 }
@@ -584,13 +586,14 @@ TEST_F(UDPv6Tests, send_and_receive_between_allowed_sockets_using_localhost)
                 Locators locators_end(locator_list.end());
 
                 EXPECT_TRUE(send_resource_list.at(0)->send(buffer_list, 5, &locators_begin, &locators_end,
-                        (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+                        (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
             };
 
     senderThread.reset(new std::thread(sendThreadFunction));
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
     senderThread->join();
     sem.wait();
+    msg_recv->setCallback(nullptr);
 }
 
 TEST_F(UDPv6Tests, send_and_receive_between_allowed_sockets_using_unicast)
@@ -650,13 +653,14 @@ TEST_F(UDPv6Tests, send_and_receive_between_allowed_sockets_using_unicast)
                     Locators locators_end(locator_list.end());
 
                     EXPECT_TRUE(send_resource_list.at(0)->send(buffer_list, 5, &locators_begin, &locators_end,
-                            (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+                            (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
                 };
 
         senderThread.reset(new std::thread(sendThreadFunction));
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         senderThread->join();
         sem.wait();
+        msg_recv->setCallback(nullptr);
     }
 }
 
@@ -717,13 +721,14 @@ TEST_F(UDPv6Tests, send_and_receive_between_allowed_sockets_using_unicast_to_mul
                     Locators locators_end(locator_list.end());
 
                     EXPECT_TRUE(send_resource_list.at(0)->send(buffer_list, 5, &locators_begin, &locators_end,
-                            (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+                            (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
                 };
 
         senderThread.reset(new std::thread(sendThreadFunction));
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         senderThread->join();
         sem.wait();
+        msg_recv->setCallback(nullptr);
     }
 }
 
@@ -840,7 +845,7 @@ TEST_F(UDPv6Tests, simple_throughput)
         Locators locators_end(send_locators_list.end());
 
         EXPECT_TRUE(send_resource_list.at(0)->send(buffer_list, sizeof(sample_data), &locators_begin, &locators_end,
-                (std::chrono::steady_clock::now() + std::chrono::milliseconds(100))));
+                (std::chrono::steady_clock::now() + std::chrono::milliseconds(100)), 0));
     }
 
     auto t1 = std::chrono::high_resolution_clock::now();

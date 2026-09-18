@@ -28,18 +28,18 @@
 #include "PubSubParticipant.hpp"
 #include "PubSubReader.hpp"
 #include "PubSubWriter.hpp"
-#include "ReqRepAsReliableHelloWorldReplier.hpp"
-#include "ReqRepAsReliableHelloWorldRequester.hpp"
 
 using namespace eprosima::fastdds;
 using namespace eprosima::fastdds::rtps;
 
+namespace {
 enum communication_type
 {
     TRANSPORT,
     INTRAPROCESS,
     DATASHARING
 };
+}  // namespace
 
 class PubSubBasic : public testing::TestWithParam<std::tuple<communication_type, bool>>
 {
@@ -52,7 +52,8 @@ public:
         {
             case INTRAPROCESS:
                 library_settings.intraprocess_delivery = eprosima::fastdds::IntraprocessDeliveryType::INTRAPROCESS_FULL;
-                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(library_settings);
+                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(
+                    library_settings);
                 break;
             case DATASHARING:
                 enable_datasharing = true;
@@ -72,7 +73,8 @@ public:
         {
             case INTRAPROCESS:
                 library_settings.intraprocess_delivery = eprosima::fastdds::IntraprocessDeliveryType::INTRAPROCESS_OFF;
-                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(library_settings);
+                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(
+                    library_settings);
                 break;
             case DATASHARING:
                 enable_datasharing = false;
@@ -258,30 +260,6 @@ TEST_P(PubSubBasic, AsyncPubSubAsReliableHelloworld)
     ASSERT_TRUE(data.empty());
     // Block reader until reception finished or timeout.
     reader.block_for_all();
-}
-
-TEST_P(PubSubBasic, ReqRepAsReliableHelloworld)
-{
-    ReqRepAsReliableHelloWorldRequester requester;
-    ReqRepAsReliableHelloWorldReplier replier;
-    const uint16_t nmsgs = 10;
-
-    requester.init();
-
-    ASSERT_TRUE(requester.isInitialized());
-
-    replier.init();
-
-    requester.wait_discovery();
-    replier.wait_discovery();
-
-    ASSERT_TRUE(replier.isInitialized());
-
-    for (uint16_t count = 0; count < nmsgs; ++count)
-    {
-        requester.send(count);
-        requester.block(std::chrono::seconds(5));
-    }
 }
 
 TEST_P(PubSubBasic, PubSubAsReliableData64kb)
@@ -565,9 +543,9 @@ TEST_P(PubSubBasic, ReceivedPropertiesDataWithinSizeLimit)
     property_policy.properties().emplace_back(
         eprosima::fastdds::dds::parameter_policy_physical_data_process, "test_process");
 
-    writer.static_discovery("file://PubSubWriter_static_disc.xml")
+    writer.static_discovery("file://RTPSParticipant_static_disc.xml")
             .unicastLocatorList(WriterUnicastLocators)
-            .multicastLocatorList(WriterMulticastLocators)
+            .multicast_locator_list(WriterMulticastLocators)
             .setPublisherIDs(1, 2)
             .setManualTopicName(std::string("BlackBox_StaticDiscovery_") + TOPIC_RANDOM_NUMBER)
             .property_policy(property_policy)
@@ -603,9 +581,9 @@ TEST_P(PubSubBasic, ReceivedPropertiesDataWithinSizeLimit)
     // Total: 240 Bytes
 
     reader.properties_max_size(240)
-            .static_discovery("file://PubSubReader_static_disc.xml")
+            .static_discovery("file://RTPSParticipant_static_disc.xml")
             .unicastLocatorList(ReaderUnicastLocators)
-            .multicastLocatorList(ReaderMulticastLocators)
+            .multicast_locator_list(ReaderMulticastLocators)
             .setSubscriberIDs(3, 4)
             .setManualTopicName(std::string("BlackBox_StaticDiscovery_") + TOPIC_RANDOM_NUMBER)
             .property_policy(property_policy)
@@ -684,8 +662,8 @@ TEST_P(PubSubBasic, ReceivedPropertiesDataExceedsSizeLimit)
     LocatorBuffer.port = static_cast<uint16_t>(MULTICAST_PORT_RANDOM_NUMBER);
     WriterMulticastLocators.push_back(LocatorBuffer);
 
-    writer.static_discovery("file://PubSubWriter_static_disc.xml").
-            unicastLocatorList(WriterUnicastLocators).multicastLocatorList(WriterMulticastLocators).
+    writer.static_discovery("file://RTPSParticipant_static_disc.xml").
+            unicastLocatorList(WriterUnicastLocators).multicast_locator_list(WriterMulticastLocators).
             setPublisherIDs(1,
             2).setManualTopicName(std::string("BlackBox_StaticDiscovery_") + TOPIC_RANDOM_NUMBER).init();
 
@@ -703,8 +681,8 @@ TEST_P(PubSubBasic, ReceivedPropertiesDataExceedsSizeLimit)
 
     //Expected properties have size 92
     reader.properties_max_size(50)
-            .static_discovery("file://PubSubReader_static_disc.xml")
-            .unicastLocatorList(ReaderUnicastLocators).multicastLocatorList(ReaderMulticastLocators)
+            .static_discovery("file://RTPSParticipant_static_disc.xml")
+            .unicastLocatorList(ReaderUnicastLocators).multicast_locator_list(ReaderMulticastLocators)
             .setSubscriberIDs(3,
             4).setManualTopicName(std::string("BlackBox_StaticDiscovery_") + TOPIC_RANDOM_NUMBER).init();
 

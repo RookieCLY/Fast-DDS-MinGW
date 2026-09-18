@@ -26,10 +26,10 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_fail)
             WillOnce(Return(true));
 
     ParticipantProxyData participant_data;
-    fill_participant_key(participant_data.m_guid);
+    fill_participant_key(participant_data.guid);
     ParticipantAuthenticationInfo info;
     info.status = ParticipantAuthenticationInfo::UNAUTHORIZED_PARTICIPANT;
-    info.guid = participant_data.m_guid;
+    info.guid = participant_data.guid;
     EXPECT_CALL(*participant_.getListener(), onParticipantAuthentication(_, info)).Times(1);
 
     ASSERT_FALSE(manager_.discovered_participant(participant_data));
@@ -41,7 +41,7 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_ok)
 
     auto& remote_identity_handle = get_handle<MockIdentityHandle>();
     ParticipantProxyData participant_data;
-    fill_participant_key(participant_data.m_guid);
+    fill_participant_key(participant_data.guid);
 
     EXPECT_CALL(*auth_plugin_, validate_remote_identity_rvr(_, Ref(local_identity_handle_), _, _, _)).Times(1).
             WillOnce(DoAll(SetArgPointee<0>(&remote_identity_handle), Return(ValidationResult_t::VALIDATION_OK)));
@@ -54,7 +54,7 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_ok)
 
     ParticipantAuthenticationInfo info;
     info.status = ParticipantAuthenticationInfo::AUTHORIZED_PARTICIPANT;
-    info.guid = participant_data.m_guid;
+    info.guid = participant_data.guid;
     EXPECT_CALL(*participant_.getListener(), onParticipantAuthentication(_, info)).Times(1);
 
     ASSERT_TRUE(manager_.discovered_participant(participant_data));
@@ -77,7 +77,7 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_pending_h
             WillOnce(Return(true));
 
     ParticipantProxyData participant_data;
-    fill_participant_key(participant_data.m_guid);
+    fill_participant_key(participant_data.guid);
     ASSERT_TRUE(manager_.discovered_participant(participant_data));
 
     return_handle(remote_identity_handle);
@@ -103,10 +103,10 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_pending_h
     EXPECT_CALL(pdp_, get_participant_proxy_data_serialized(BIGEND)).Times(1);
 
     ParticipantProxyData participant_data;
-    fill_participant_key(participant_data.m_guid);
+    fill_participant_key(participant_data.guid);
     ParticipantAuthenticationInfo info;
     info.status = ParticipantAuthenticationInfo::UNAUTHORIZED_PARTICIPANT;
-    info.guid = participant_data.m_guid;
+    info.guid = participant_data.guid;
     EXPECT_CALL(*participant_.getListener(), onParticipantAuthentication(_, info)).Times(1);
 
     ASSERT_FALSE(manager_.discovered_participant(participant_data));
@@ -123,7 +123,7 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_pending_h
     auto shared_secret_handle = get_sh_ptr<MockSharedSecretHandle>();
     auto participant_crypto_handle = get_sh_ptr<MockParticipantCryptoHandle>();
     ParticipantProxyData participant_data;
-    fill_participant_key(participant_data.m_guid);
+    fill_participant_key(participant_data.guid);
 
     EXPECT_CALL(*auth_plugin_, validate_remote_identity_rvr(_, Ref(local_identity_handle_), _, _, _)).Times(1).
             WillOnce(DoAll(SetArgPointee<0>(&remote_identity_handle),
@@ -157,7 +157,7 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_pending_h
 
     ParticipantAuthenticationInfo info;
     info.status = ParticipantAuthenticationInfo::AUTHORIZED_PARTICIPANT;
-    info.guid = participant_data.m_guid;
+    info.guid = participant_data.guid;
     EXPECT_CALL(*participant_.getListener(), onParticipantAuthentication(_, info)).Times(1);
 
     CacheChange_t kx_change_to_add;
@@ -199,7 +199,7 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_new_chang
     EXPECT_CALL(pdp_, get_participant_proxy_data_serialized(BIGEND)).Times(1);
 
     ParticipantProxyData participant_data;
-    fill_participant_key(participant_data.m_guid);
+    fill_participant_key(participant_data.guid);
     ASSERT_FALSE(manager_.discovered_participant(participant_data));
 
     return_handle(remote_identity_handle);
@@ -236,7 +236,7 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_add_chang
     EXPECT_CALL(pdp_, get_participant_proxy_data_serialized(BIGEND)).Times(1);
 
     ParticipantProxyData participant_data;
-    fill_participant_key(participant_data.m_guid);
+    fill_participant_key(participant_data.guid);
     ASSERT_FALSE(manager_.discovered_participant(participant_data));
 
     destroy_manager_and_change(change, false);
@@ -292,7 +292,7 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_pending_h
     auto shared_secret_handle = get_sh_ptr<MockSharedSecretHandle>();
     auto participant_crypto_handle = get_sh_ptr<MockParticipantCryptoHandle>();
     ParticipantProxyData participant_data;
-    fill_participant_key(participant_data.m_guid);
+    fill_participant_key(participant_data.guid);
 
     EXPECT_CALL(*auth_plugin_, validate_remote_identity_rvr(_, Ref(local_identity_handle_), _, _, _)).Times(1).
             WillOnce(DoAll(SetArgPointee<0>(&remote_identity_handle),
@@ -330,7 +330,7 @@ TEST_F(SecurityTest, discovered_participant_validation_remote_identity_pending_h
 
     ParticipantAuthenticationInfo info;
     info.status = ParticipantAuthenticationInfo::AUTHORIZED_PARTICIPANT;
-    info.guid = participant_data.m_guid;
+    info.guid = participant_data.guid;
     EXPECT_CALL(*participant_.getListener(), onParticipantAuthentication(_, info)).Times(1);
 
     CacheChange_t kx_change_to_add;
@@ -377,7 +377,7 @@ TEST_F(SecurityTest, discovered_participant_ok)
     EXPECT_CALL(pdp_, get_participant_proxy_data_serialized(BIGEND)).Times(1);
 
     ParticipantProxyData participant_data;
-    fill_participant_key(participant_data.m_guid);
+    fill_participant_key(participant_data.guid);
     ASSERT_TRUE(manager_.discovered_participant(participant_data));
 
     destroy_manager_and_change(change);
@@ -399,10 +399,10 @@ TEST_F(SecurityTest, discovered_participant_validate_remote_fail_and_then_ok)
             WillOnce(Return(ValidationResult_t::VALIDATION_FAILED));
 
     ParticipantProxyData participant_data;
-    fill_participant_key(participant_data.m_guid);
+    fill_participant_key(participant_data.guid);
     ParticipantAuthenticationInfo info;
     info.status = ParticipantAuthenticationInfo::UNAUTHORIZED_PARTICIPANT;
-    info.guid = participant_data.m_guid;
+    info.guid = participant_data.guid;
     EXPECT_CALL(*participant_.getListener(), onParticipantAuthentication(_, info)).Times(1);
 
     ASSERT_FALSE(manager_.discovered_participant(participant_data));
@@ -433,4 +433,121 @@ TEST_F(SecurityTest, discovered_participant_validate_remote_fail_and_then_ok)
 
     return_handle(remote_identity_handle);
     return_handle(handshake_handle);
+}
+
+class SecurityTestParticipantLimit : public SecurityTest
+{
+public:
+
+    SecurityTestParticipantLimit()
+        : SecurityTest(make_limited_pattr())
+    {
+    }
+
+private:
+
+    static RTPSParticipantAttributes make_limited_pattr()
+    {
+        RTPSParticipantAttributes p;
+        p.allocation.participants.maximum = 1;
+        return p;
+    }
+
+};
+
+// Regression test for CVE-2026-45092: verifies that discovered_participant succeeds when the participant count is below the configured maximum.
+TEST_F(SecurityTestParticipantLimit, discovered_participant_below_limit_succeeds)
+{
+    initialization_auth_ok();
+
+    auto& remote_identity_handle = get_handle<MockIdentityHandle>();
+    ParticipantProxyData participant_data;
+    fill_participant_key(participant_data.guid);
+
+    EXPECT_CALL(*auth_plugin_, validate_remote_identity_rvr(_, Ref(local_identity_handle_), _, _, _)).Times(1).
+            WillOnce(DoAll(SetArgPointee<0>(&remote_identity_handle),
+            Return(ValidationResult_t::VALIDATION_OK)));
+    EXPECT_CALL(*auth_plugin_, return_identity_handle(&local_identity_handle_, _)).Times(1).
+            WillOnce(Return(true));
+    EXPECT_CALL(*auth_plugin_, return_identity_handle(&remote_identity_handle, _)).Times(1).
+            WillOnce(Return(true));
+    EXPECT_CALL(participant_, pdp()).Times(1).WillOnce(Return(&pdp_));
+    EXPECT_CALL(pdp_, notifyAboveRemoteEndpoints(_, true)).Times(1);
+
+    ParticipantAuthenticationInfo info;
+    info.status = ParticipantAuthenticationInfo::AUTHORIZED_PARTICIPANT;
+    info.guid = participant_data.guid;
+    EXPECT_CALL(*participant_.getListener(), onParticipantAuthentication(_, info)).Times(1);
+
+    ASSERT_TRUE(manager_.discovered_participant(participant_data));
+
+    return_handle(remote_identity_handle);
+}
+
+// Regression test for CVE-2026-45092: verifies that a new unknown participant is rejected when the map is full.
+TEST_F(SecurityTestParticipantLimit, discovered_participant_limit_rejects_unknown)
+{
+    initialization_auth_ok();
+
+    auto& remote_identity_handle_a = get_handle<MockIdentityHandle>();
+    ParticipantProxyData participant_data_a;
+    fill_participant_key(participant_data_a.guid);
+
+    EXPECT_CALL(*auth_plugin_, validate_remote_identity_rvr(_, Ref(local_identity_handle_), _, _, _)).Times(1).
+            WillOnce(DoAll(SetArgPointee<0>(&remote_identity_handle_a),
+            Return(ValidationResult_t::VALIDATION_OK)));
+    EXPECT_CALL(*auth_plugin_, return_identity_handle(&local_identity_handle_, _)).Times(1).
+            WillOnce(Return(true));
+    EXPECT_CALL(*auth_plugin_, return_identity_handle(&remote_identity_handle_a, _)).Times(1).
+            WillOnce(Return(true));
+    EXPECT_CALL(participant_, pdp()).Times(1).WillOnce(Return(&pdp_));
+    EXPECT_CALL(pdp_, notifyAboveRemoteEndpoints(_, true)).Times(1);
+
+    ParticipantAuthenticationInfo info_a;
+    info_a.status = ParticipantAuthenticationInfo::AUTHORIZED_PARTICIPANT;
+    info_a.guid = participant_data_a.guid;
+    EXPECT_CALL(*participant_.getListener(), onParticipantAuthentication(_, info_a)).Times(1);
+
+    ASSERT_TRUE(manager_.discovered_participant(participant_data_a));
+
+    // Map is full; a participant with a different GUID must be rejected.
+    ParticipantProxyData participant_data_b;
+    participant_data_b.guid.guidPrefix.value[0] = 0xAA;
+    participant_data_b.guid.guidPrefix.value[1] = 0xBB;
+
+    ASSERT_FALSE(manager_.discovered_participant(participant_data_b));
+
+    return_handle(remote_identity_handle_a);
+}
+
+// Regression test for CVE-2026-45092: verifies that re-discovering an already-known participant succeeds even when the map is full.
+TEST_F(SecurityTestParticipantLimit, discovered_participant_limit_allows_rediscovery)
+{
+    initialization_auth_ok();
+
+    auto& remote_identity_handle_a = get_handle<MockIdentityHandle>();
+    ParticipantProxyData participant_data_a;
+    fill_participant_key(participant_data_a.guid);
+
+    EXPECT_CALL(*auth_plugin_, validate_remote_identity_rvr(_, Ref(local_identity_handle_), _, _, _)).Times(1).
+            WillOnce(DoAll(SetArgPointee<0>(&remote_identity_handle_a),
+            Return(ValidationResult_t::VALIDATION_OK)));
+    EXPECT_CALL(*auth_plugin_, return_identity_handle(&local_identity_handle_, _)).Times(1).
+            WillOnce(Return(true));
+    EXPECT_CALL(*auth_plugin_, return_identity_handle(&remote_identity_handle_a, _)).Times(1).
+            WillOnce(Return(true));
+    EXPECT_CALL(participant_, pdp()).Times(1).WillOnce(Return(&pdp_));
+    EXPECT_CALL(pdp_, notifyAboveRemoteEndpoints(_, true)).Times(1);
+
+    ParticipantAuthenticationInfo info_a;
+    info_a.status = ParticipantAuthenticationInfo::AUTHORIZED_PARTICIPANT;
+    info_a.guid = participant_data_a.guid;
+    EXPECT_CALL(*participant_.getListener(), onParticipantAuthentication(_, info_a)).Times(1);
+
+    ASSERT_TRUE(manager_.discovered_participant(participant_data_a));
+
+    // Map is full; the same participant must still be accepted via the lookup path.
+    ASSERT_TRUE(manager_.discovered_participant(participant_data_a));
+
+    return_handle(remote_identity_handle_a);
 }

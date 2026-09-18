@@ -78,6 +78,7 @@ ReaderApp::ReaderApp(
         const CLIParser::rtps_config& config,
         const std::string& topic_name)
     : samples_(config.samples)
+    , samples_received_(0)
     , rtps_participant_(nullptr)
     , rtps_reader_(nullptr)
     , reader_history_(nullptr)
@@ -167,8 +168,8 @@ void ReaderApp::on_new_cache_change_added(
     {
         if (deserialize_payload(change->serializedPayload, data_))
         {
-            std::cout << "Message: " << data_->message() << " with index " <<  data_->index() << " RECEIVED" <<
-                std::endl;
+            std::cout << "Message: " << data_->message() << " with index " <<  data_->index() << " RECEIVED"
+                      << std::endl;
             samples_received_++;
         }
         else

@@ -15,7 +15,7 @@
 ###############################################################################
 # CMake build rules for Fast DDS
 ###############################################################################
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.22) # TODO 3.28
 
 # Set CMAKE_BUILD_TYPE to Release by default.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -29,12 +29,14 @@ endif()
 ###############################################################################
 # Project                                                                     #
 ###############################################################################
-project(fastdds VERSION "3.1.0" LANGUAGES C CXX)
+project(fastdds VERSION "3.6.2.0" LANGUAGES C CXX)
 
 set(PROJECT_NAME_LARGE "Fast DDS")
 string(TOUPPER "${PROJECT_NAME}" PROJECT_NAME_UPPER)
 
 message(STATUS "Version: ${PROJECT_VERSION}")
+
+set(FASTDDS_BASIC_DIR ${PROJECT_SOURCE_DIR})
 
 ###############################################################################
 # eProsima build options
@@ -89,19 +91,6 @@ else()
     if(EPROSIMA_BUILD)
         string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
     endif()
-endif()
-
-###############################################################################
-# CCache on Windows on CI
-###############################################################################
-if (MSVC AND CMAKE_CXX_COMPILER_LAUNCHER STREQUAL "ccache")
-    foreach(config DEBUG RELWITHDEBINFO)
-        foreach(lang C CXX)
-            set(flags_var "CMAKE_${lang}_FLAGS_${config}")
-            string(REPLACE "/Zi" "/Z7" ${flags_var} "${${flags_var}}")
-            set(${flags_var} "${${flags_var}}")
-        endforeach()
-    endforeach()
 endif()
 
 ###############################################################################
@@ -177,6 +166,23 @@ if (SANITIZER)
             message(FATAL_ERROR "Thread sanitizer requires Clang or GCC. Aborting.")
         endif()
 
+    elseif(${SANITIZER} STREQUAL "UNDEFINED")
+        message(STATUS "Enabling undefined behavior sanitizer...")
+        # Warning/Error messages
+        if(NOT (CMAKE_BUILD_TYPE STREQUAL "Debug"))
+            message(WARNING "Undefined behavior sanitizer results with an optimized (non-Debug) build may be misleading")
+        endif()
+
+        if(CMAKE_COMPILER_IS_GNUCXX)
+            message(STATUS "Building with Undefined behavior sanitizer Tools")
+
+            set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=undefined -fno-omit-frame-pointer -fsanitize=float-cast-overflow -fsanitize=float-divide-by-zero -fsanitize=bounds-strict")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined -fno-omit-frame-pointer -fsanitize=float-cast-overflow -fsanitize=float-divide-by-zero -fsanitize=bounds-strict")
+
+        else()
+            message(FATAL_ERROR "Undefined behavior sanitizer requires GCC. Aborting.")
+        endif()
+
     else()
         message(WARNING "Sanitizer option not supported. Continuing without any code instrumentation... ")
 
@@ -189,12 +195,7 @@ endif()
 string(FIND ${CMAKE_CXX_FLAGS} "-fsanitize=thread" SANITIZER_THREAD)
 if (${SANITIZER_THREAD} EQUAL -1)
     message(STATUS "Setting warnings as errors...")
-    if(MSVC OR MSVC_IDE)
-        add_compile_options(/WX)
-    else()
-        set(CMAKE_CXX_FLAGS
-            "${CMAKE_CXX_FLAGS} -Werror")
-    endif()
+    set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
 endif()
 
 ###############################################################################
@@ -255,7 +256,7 @@ if(NOT BUILD_SHARED_LIBS)
 endif()
 
 eprosima_find_package(fastcdr 2 REQUIRED)
-eprosima_find_thirdparty(Asio asio VERSION 1.10.8)
+eprosima_find_thirdparty(Asio asio VERSION 1.13.0)
 eprosima_find_thirdparty(TinyXML2 tinyxml2)
 
 find_package(foonathan_memory REQUIRED)
@@ -564,10 +565,15 @@ if(BUILD_DOCUMENTATION)
             # file(ARCHIVE_EXTRACT INPUT "./eprosima-fast-rtps.zip" DESTINATION  "${PROJECT_BINARY_DIR}/doc/")
             execute_process(COMMAND "${UNZIP_EXE}" "./eprosima-fast-rtps.zip" -d "${PROJECT_BINARY_DIR}/doc/")
             file(REMOVE_RECURSE "${PROJECT_BINARY_DIR}/doc/manual")
-            if (DOWNLOAD_RC)
+
+            if (EXISTS "${PROJECT_BINARY_DIR}/doc/html")
+                file(RENAME "${PROJECT_BINARY_DIR}/doc/html" "${PROJECT_BINARY_DIR}/doc/manual")
+            elseif (EXISTS "${PROJECT_BINARY_DIR}/doc/eprosima-fast-rtps-v${PROJECT_VERSION}")
+                file(RENAME "${PROJECT_BINARY_DIR}/doc/eprosima-fast-rtps-v${PROJECT_VERSION}" "${PROJECT_BINARY_DIR}/doc/manual")
+            elseif (EXISTS "${PROJECT_BINARY_DIR}/doc/eprosima-fast-rtps-latest")
                 file(RENAME "${PROJECT_BINARY_DIR}/doc/eprosima-fast-rtps-latest" "${PROJECT_BINARY_DIR}/doc/manual")
             else()
-                file(RENAME "${PROJECT_BINARY_DIR}/doc/eprosima-fast-rtps-v${PROJECT_VERSION}" "${PROJECT_BINARY_DIR}/doc/manual")
+                message(FATAL_ERROR "The downloaded documentation did not extract any known directory into ${PROJECT_BINARY_DIR}/doc")
             endif()
             file(REMOVE  "./eprosima-fast-rtps.zip")
 

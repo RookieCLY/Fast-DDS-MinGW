@@ -27,7 +27,7 @@
 #include <memory>
 #include <mutex>
 
-#include <asio.hpp>
+#include "../network/asio.hpp"
 #include <asio/steady_timer.hpp>
 
 #include <fastdds/rtps/common/LocatorWithMask.hpp>
@@ -87,16 +87,15 @@ class TCPTransportInterface : public TransportInterface
 
 protected:
 
-    asio::io_service io_service_;
-    asio::io_service io_service_timers_;
+    asio::io_context io_context_;
+    asio::io_context io_context_timers_;
     std::unique_ptr<asio::ip::tcp::socket> initial_peer_local_locator_socket_;
     uint16_t initial_peer_local_locator_port_;
 
 #if TLS_FOUND
     asio::ssl::context ssl_context_;
 #endif // if TLS_FOUND
-    eprosima::thread io_service_thread_;
-    eprosima::thread io_service_timers_thread_;
+    eprosima::thread io_context_thread_;
     std::shared_ptr<RTCPMessageManager> rtcp_message_manager_;
     std::mutex rtcp_message_manager_mutex_;
     std::condition_variable rtcp_message_manager_cv_;
@@ -111,8 +110,6 @@ protected:
     std::map<uint16_t, std::pair<TransportReceiverInterface*, ReceiverInUseCV*>> receiver_resources_;
 
     std::vector<std::pair<TCPChannelResource*, uint64_t>> sockets_timestamp_;
-
-    asio::steady_timer keep_alive_event_;
 
     std::map<Locator, std::shared_ptr<TCPAcceptor>> acceptors_;
 
@@ -403,13 +400,15 @@ public:
      * so should not be reuse.
      * @param destination_locators_end pointer to destination locators iterator end, the iterator can be advanced inside this fuction
      * so should not be reuse.
+     * @param transport_priority Transport priority to use for this send.
      */
     bool send(
             const std::vector<NetworkBuffer>& buffers,
             uint32_t total_bytes,
             const Locator_t& locator,
             LocatorsIterator* destination_locators_begin,
-            LocatorsIterator* destination_locators_end);
+            LocatorsIterator* destination_locators_end,
+            const int32_t transport_priority);
 
     /**
      * Performs the locator selection algorithm for this transport.
@@ -453,6 +452,10 @@ public:
      */
     virtual std::vector<std::string> get_binding_interfaces_list() = 0;
 
+    /**
+     * This method should never be called because TCP interfaces do not support
+     * multicast locators. It always returns false
+     */
     bool getDefaultMetatrafficMulticastLocators(
             LocatorList& locators,
             uint32_t metatraffic_multicast_port) const override;
@@ -465,6 +468,10 @@ public:
             LocatorList& locators,
             uint32_t unicast_port) const override;
 
+    /**
+     * This method should never be called because TCP interfaces do not support
+     * multicast locators. It always returns false
+     */
     bool fillMetatrafficMulticastLocator(
             Locator& locator,
             uint32_t metatraffic_multicast_port) const override;
@@ -494,8 +501,6 @@ public:
     virtual const TCPTransportDescriptor* configuration() const = 0;
 
     virtual TCPTransportDescriptor* configuration() = 0;
-
-    void keep_alive();
 
     void update_network_interfaces() override;
 

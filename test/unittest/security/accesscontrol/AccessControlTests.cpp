@@ -167,6 +167,7 @@ void AccessControlTest::get_access_handle(
         bool should_success)
 {
     IdentityHandle* identity_handle = nullptr;
+    auto part_props = participant_attr.properties;
 
     ValidationResult_t result = ValidationResult_t::VALIDATION_FAILED;
     SecurityException exception;
@@ -176,7 +177,7 @@ void AccessControlTest::get_access_handle(
         &identity_handle,
         adjusted_participant_key,
         domain_id,
-        participant_attr,
+        part_props,
         candidate_participant_key,
         exception);
 
@@ -188,7 +189,7 @@ void AccessControlTest::get_access_handle(
         authentication_plugin,
         *identity_handle,
         domain_id,
-        participant_attr,
+        part_props,
         exception);
 
     bool success = *access_handle != nullptr;
@@ -233,8 +234,8 @@ void AccessControlTest::check_remote_datareader(
     SecurityException exception;
 
     ReaderProxyData reader_proxy_data(1, 1);
-    reader_proxy_data.topicName(eprosima::fastcdr::string_255(topic_name));
-    reader_proxy_data.m_qos.m_partition.setNames(partitions);
+    reader_proxy_data.topic_name = eprosima::fastcdr::string_255(topic_name);
+    reader_proxy_data.partition.setNames(partitions);
     bool relay_only;
     bool result = access_plugin.check_remote_datareader(
         *access_handle,
@@ -291,8 +292,8 @@ void AccessControlTest::check_remote_datawriter(
     SecurityException exception;
 
     WriterProxyData writer_proxy_data(1, 1);
-    writer_proxy_data.topicName(eprosima::fastcdr::string_255(topic_name));
-    writer_proxy_data.m_qos.m_partition.setNames(partitions);
+    writer_proxy_data.topic_name = eprosima::fastcdr::string_255(topic_name);
+    writer_proxy_data.partition.setNames(partitions);
     bool result = access_plugin.check_remote_datawriter(
         *access_handle,
         domain_id,
@@ -495,7 +496,7 @@ TEST_F(AccessControlTest, validation_ok_on_chained_ca)
     permissions_ca = "chainedcacert.pem";
     permissions_file = "permissions_signed_by_chained_ca.smime";
     governance_file = "governance_signed_by_chained_ca.smime";
-    
+
     topic_name = "HelloWorldTopic_no_partitions";
 
     RTPSParticipantAttributes subscriber_participant_attr;
@@ -507,6 +508,54 @@ TEST_F(AccessControlTest, validation_ok_on_chained_ca)
     fill_publisher_participant_security_attributes(publisher_participant_attr);
     check_local_datawriter(publisher_participant_attr, true);
     check_remote_datawriter(publisher_participant_attr, true);
+}
+
+/* Regression test for advisories GHSA-j2w9-582m-j57r/
+ *
+ * GHSA-rg6h-2jch-hwjx/GHSA-r4gh-qh7w-jxqf
+ *
+ * NULL Pointer Dereferences in Permissions and Governance Parsers
+ */
+TEST_F(AccessControlTest, participant_creation_fail_with_empty_no_after_xml_field)
+{
+    permissions_ca = "maincacert.pem";
+    permissions_file = "permissions_blank_not_after.smime";
+    governance_file = "governance_helloworld_all_enable.smime";
+
+    RTPSParticipantAttributes subscriber_participant_attr;
+    fill_subscriber_participant_security_attributes(subscriber_participant_attr);
+
+    PermissionsHandle* access_handle;
+    get_access_handle(subscriber_participant_attr, &access_handle, false);
+
+}
+
+TEST_F(AccessControlTest, participant_creation_fail_with_empty_dds_xml_field)
+{
+    permissions_ca = "maincacert.pem";
+    permissions_file = "permissions_blank_dds.smime";
+    governance_file = "governance_helloworld_all_enable.smime";
+
+    RTPSParticipantAttributes subscriber_participant_attr;
+    fill_subscriber_participant_security_attributes(subscriber_participant_attr);
+
+    PermissionsHandle* access_handle;
+    get_access_handle(subscriber_participant_attr, &access_handle, false);
+
+}
+
+TEST_F(AccessControlTest, participant_creation_fail_with_empty_topic_expression_xml_field)
+{
+    permissions_ca = "maincacert.pem";
+    permissions_file = "permissions_access_control_tests.smime";
+    governance_file = "governance_blank_topic_expression.smime";
+
+    RTPSParticipantAttributes subscriber_participant_attr;
+    fill_subscriber_participant_security_attributes(subscriber_participant_attr);
+
+    PermissionsHandle* access_handle;
+    get_access_handle(subscriber_participant_attr, &access_handle, false);
+
 }
 
 int main(

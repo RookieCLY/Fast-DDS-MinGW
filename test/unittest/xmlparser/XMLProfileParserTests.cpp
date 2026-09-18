@@ -136,7 +136,7 @@ protected:
 
     std::string xml_filename_ = "test_xml_profile.xml";
 
-    const std::pair<std::string, std::string> c_environment_values_[168]
+    const std::pair<std::string, std::string> c_environment_values_[169]
     {
         {"XML_PROFILES_ENV_VAR_1",   "123"},
         {"XML_PROFILES_ENV_VAR_2",   "4"},
@@ -305,7 +305,8 @@ protected:
         {"XML_PROFILES_ENV_VAR_165", "2048"},
         {"XML_PROFILES_ENV_VAR_166",  "45"},
         {"XML_PROFILES_ENV_VAR_167",  "test_flow_controller"},
-        {"XML_PROFILES_ENV_VAR_168",  "251"}
+        {"XML_PROFILES_ENV_VAR_168",  "251"},
+        {"XML_PROFILES_ENV_VAR_169",  "127.0.0.1"}
     };
 
 };
@@ -568,6 +569,7 @@ TEST_P(XMLProfileParserTests, XMLParserParticipant)
     EXPECT_EQ(port.offsetd3, 456);
     EXPECT_EQ(port.offsetd4, 251);
     EXPECT_EQ(rtps_atts.participantID, 9898);
+    EXPECT_EQ(rtps_atts.easy_mode_ip, "127.0.0.1");
     EXPECT_EQ(rtps_atts.flow_controllers.at(0)->max_bytes_per_period, 2048);
     EXPECT_EQ(rtps_atts.flow_controllers.at(0)->period_ms, 45u);
     EXPECT_EQ(rtps_atts.useBuiltinTransports, true);
@@ -669,6 +671,7 @@ TEST_F(XMLProfileParserBasicTests, XMLParserParticipantDeprecated)
     EXPECT_EQ(port.offsetd3, 456);
     EXPECT_EQ(port.offsetd4, 251);
     EXPECT_EQ(rtps_atts.participantID, 9898);
+    EXPECT_EQ(rtps_atts.easy_mode_ip, "127.0.0.1");
     EXPECT_EQ(rtps_atts.flow_controllers.at(0)->max_bytes_per_period, 2048);
     EXPECT_EQ(rtps_atts.flow_controllers.at(0)->period_ms, 45u);
     EXPECT_EQ(rtps_atts.useBuiltinTransports, true);
@@ -753,6 +756,7 @@ TEST_P(XMLProfileParserTests, XMLParserDefaultParticipantProfile)
     EXPECT_EQ(port.offsetd3, 456);
     EXPECT_EQ(port.offsetd4, 251);
     EXPECT_EQ(rtps_atts.participantID, 9898);
+    EXPECT_EQ(rtps_atts.easy_mode_ip, "127.0.0.1");
     EXPECT_EQ(rtps_atts.flow_controllers.at(0)->max_bytes_per_period, 2048);
     EXPECT_EQ(rtps_atts.flow_controllers.at(0)->period_ms, 45u);
     EXPECT_EQ(rtps_atts.useBuiltinTransports, true);
@@ -837,6 +841,7 @@ TEST_F(XMLProfileParserBasicTests, XMLParserDefaultParticipantProfileDeprecated)
     EXPECT_EQ(port.offsetd3, 456);
     EXPECT_EQ(port.offsetd4, 251);
     EXPECT_EQ(rtps_atts.participantID, 9898);
+    EXPECT_EQ(rtps_atts.easy_mode_ip, "127.0.0.1");
     EXPECT_EQ(rtps_atts.flow_controllers.at(0)->max_bytes_per_period, 2048);
     EXPECT_EQ(rtps_atts.flow_controllers.at(0)->period_ms, 45u);
     EXPECT_EQ(rtps_atts.useBuiltinTransports, true);
@@ -3218,8 +3223,8 @@ TEST_F(XMLProfileParserBasicTests, external_locators_feature)
 
     for (const TestCase& test : test_cases)
     {
-        EXPECT_EQ(test.result, xmlparser::XMLProfileManager::loadXMLString(test.xml.c_str(), test.xml.length())) <<
-            " test_case = [" << test.title << "]";
+        EXPECT_EQ(test.result, xmlparser::XMLProfileManager::loadXMLString(test.xml.c_str(), test.xml.length()))
+            << " test_case = [" << test.title << "]";
         xmlparser::XMLProfileManager::DeleteInstance();
     }
 }
@@ -3299,8 +3304,8 @@ TEST_F(XMLProfileParserBasicTests, log_thread_settings_qos)
     EXPECT_CALL(*log_mock, SetThreadConfig()).Times(1);
     for (const TestCase& test : test_cases)
     {
-        EXPECT_EQ(test.result, xmlparser::XMLProfileManager::loadXMLString(test.xml.c_str(), test.xml.length())) <<
-            " test_case = [" << test.title << "]";
+        EXPECT_EQ(test.result, xmlparser::XMLProfileManager::loadXMLString(test.xml.c_str(), test.xml.length()))
+            << " test_case = [" << test.title << "]";
         xmlparser::XMLProfileManager::DeleteInstance();
     }
 }
@@ -3632,8 +3637,8 @@ TEST_F(XMLProfileParserBasicTests, domainparticipantfactory)
 
     for (const TestCase& test : test_cases)
     {
-        EXPECT_EQ(test.result, xmlparser::XMLProfileManager::loadXMLString(test.xml.c_str(), test.xml.length())) <<
-            " test_case = [" << test.title << "]";
+        EXPECT_EQ(test.result, xmlparser::XMLProfileManager::loadXMLString(test.xml.c_str(), test.xml.length()))
+            << " test_case = [" << test.title << "]";
         if (test.result == xmlparser::XMLP_ret::XML_OK)
         {
             using namespace eprosima::fastdds::dds;
@@ -3956,8 +3961,8 @@ TEST_F(XMLProfileParserBasicTests, participant_thread_settings)
 
     for (const TestCase& test : test_cases)
     {
-        EXPECT_EQ(test.result, xmlparser::XMLProfileManager::loadXMLString(test.xml.c_str(), test.xml.length())) <<
-            " test_case = [" << test.title << "]";
+        EXPECT_EQ(test.result, xmlparser::XMLProfileManager::loadXMLString(test.xml.c_str(), test.xml.length()))
+            << " test_case = [" << test.title << "]";
         if (test.result == xmlparser::XMLP_ret::XML_OK)
         {
             using namespace eprosima::fastdds::dds;
@@ -4121,8 +4126,8 @@ TEST_F(XMLProfileParserBasicTests, datareader_thread_settings)
 
     for (const TestCase& test : test_cases)
     {
-        EXPECT_EQ(test.result, xmlparser::XMLProfileManager::loadXMLString(test.xml.c_str(), test.xml.length())) <<
-            " test_case = [" << test.title << "]";
+        EXPECT_EQ(test.result, xmlparser::XMLProfileManager::loadXMLString(test.xml.c_str(), test.xml.length()))
+            << " test_case = [" << test.title << "]";
         if (test.result == xmlparser::XMLP_ret::XML_OK)
         {
             xmlparser::SubscriberAttributes profile_attr;

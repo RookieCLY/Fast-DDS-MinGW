@@ -82,7 +82,12 @@ struct TypeRegistryEntry
 
 // Class which holds the TypeObject registry, including every TypeIdentifier (plain and non-plain types), every
 // non-plain TypeObject and the non-plain TypeObject serialized sizes.
-class TypeObjectRegistry : public ITypeObjectRegistry
+// Exported so shared-library test targets can instantiate thin helper subclasses on Windows.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable:4251)
+#endif // _MSC_VER
+class FASTDDS_EXPORTED_API TypeObjectRegistry : public ITypeObjectRegistry
 {
 
 public:
@@ -230,6 +235,19 @@ public:
     ReturnCode_t get_type_object(
             const TypeIdentifier& type_identifier,
             TypeObject& type_object) override;
+
+    /**
+     * @brief Get the CompleteTypeObject related to the given type identifiers.
+     *
+     * @param [in] type_identifiers Identifiers of the type being queried.
+     * @param [out] type_object CompleteTypeObject related with the given identifiers.
+     * @return ReturnCode_t RETCODE_OK if the CompleteTypeObject are found in the registry.
+     *                      RETCODE_NO_DATA if the given type_identifiers has not been registered.
+     *                      RETCODE_BAD_PARAMETER if the type_identifiers correspond to an indirect hash.
+     */
+    ReturnCode_t get_complete_type_object(
+            const TypeIdentifierPair& type_identifiers,
+            CompleteTypeObject& type_object) override;
 
     /**
      * @brief Build the TypeInformation related to the provided @ref TypeIdentifierPair.
@@ -1105,6 +1123,9 @@ protected:
     std::mutex type_object_registry_mutex_;
 
 };
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif // _MSC_VER
 
 } // namespace xtypes
 } // namespace dds

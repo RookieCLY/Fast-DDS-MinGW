@@ -32,9 +32,11 @@ public:
 
     TCPSenderResource(
             TCPTransportInterface& transport,
-            Locator_t& locator)
+            Locator_t& locator,
+            const std::shared_ptr<TCPChannelResource>& channel = {})
         : SenderResource(transport.kind())
         , locator_(locator)
+        , channel_(channel)
     {
         // Implementation functions are bound to the right transport parameters
         clean_up = [this, &transport]()
@@ -42,15 +44,16 @@ public:
                     transport.SenderResourceHasBeenClosed(locator_);
                 };
 
-        send_buffers_lambda_ = [this, &transport](
+        send_lambda_ = [this, &transport](
             const std::vector<NetworkBuffer>& buffers,
             uint32_t total_bytes,
             LocatorsIterator* destination_locators_begin,
             LocatorsIterator* destination_locators_end,
-            const std::chrono::steady_clock::time_point&) -> bool
+            const std::chrono::steady_clock::time_point&,
+            int32_t transport_priority) -> bool
                 {
                     return transport.send(buffers, total_bytes, locator_, destination_locators_begin,
-                                   destination_locators_end);
+                                   destination_locators_end, transport_priority);
                 };
     }
 
@@ -65,6 +68,11 @@ public:
     Locator_t& locator()
     {
         return locator_;
+    }
+
+    const std::weak_ptr<TCPChannelResource>& channel() const
+    {
+        return channel_;
     }
 
     static TCPSenderResource* cast(
@@ -103,6 +111,9 @@ private:
             const SenderResource&) = delete;
 
     Locator_t locator_;
+
+    // Identity of the TCP channel at creation time, used to detect a reconnected channel sharing the same locator.
+    std::weak_ptr<TCPChannelResource> channel_;
 };
 
 } // namespace rtps

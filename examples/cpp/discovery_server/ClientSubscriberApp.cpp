@@ -29,7 +29,6 @@
 #include <fastdds/dds/subscriber/qos/SubscriberQos.hpp>
 #include <fastdds/dds/subscriber/SampleInfo.hpp>
 #include <fastdds/dds/subscriber/Subscriber.hpp>
-#include <fastdds/rtps/transport/shared_mem/SharedMemTransportDescriptor.hpp>
 #include <fastdds/rtps/transport/TCPv4TransportDescriptor.hpp>
 #include <fastdds/rtps/transport/TCPv6TransportDescriptor.hpp>
 #include <fastdds/rtps/transport/UDPv4TransportDescriptor.hpp>
@@ -84,11 +83,6 @@ ClientSubscriberApp::ClientSubscriberApp(
 
     switch (config.transport_kind)
     {
-        case TransportKind::SHM:
-            descriptor = std::make_shared<eprosima::fastdds::rtps::SharedMemTransportDescriptor>();
-            server_locator.kind = LOCATOR_KIND_SHM;
-            break;
-
         case TransportKind::UDPv4:
         {
             auto descriptor_tmp = std::make_shared<eprosima::fastdds::rtps::UDPv4TransportDescriptor>();
@@ -162,11 +156,11 @@ ClientSubscriberApp::ClientSubscriberApp(
         throw std::runtime_error("Participant initialization failed");
     }
 
-    std::cout <<
-        "Subscriber Participant " << pqos.name() <<
-        " created with GUID " << participant_->guid() <<
-        " connecting to server <" << server_locator  << "> " <<
-        std::endl;
+    std::cout
+        << "Subscriber Participant " << pqos.name()
+        << " created with GUID " << participant_->guid()
+        << " connecting to server <" << server_locator  << "> "
+        << std::endl;
 
     // Register the type
     type_.register_type(participant_);

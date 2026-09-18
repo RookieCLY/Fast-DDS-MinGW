@@ -20,10 +20,13 @@
 #include <fastdds/rtps/common/Guid.hpp>
 #include <fastdds/rtps/common/LocatorList.hpp>
 #include <fastdds/rtps/participant/RTPSParticipant.hpp>
+#include <fastdds/rtps/transport/ChainingTransport.hpp>
 #include <fastdds/rtps/transport/TransportDescriptorInterface.hpp>
 #include <fastdds/utils/IPFinder.hpp>
 #include <fastdds/utils/IPLocator.hpp>
 
+#include <rtps/network/NetworkConfiguration.hpp>
+#include <rtps/transport/MulticastTransportInterface.hpp>
 #include <rtps/transport/TCPTransportInterface.h>
 
 using namespace std;
@@ -61,7 +64,8 @@ NetworkFactory::NetworkFactory(
         }
         else
         {
-            EPROSIMA_LOG_WARNING(RTPS_NETWORK, "Unrecognized value '" << *enforce_metatraffic << "'" <<
+            EPROSIMA_LOG_WARNING(RTPS_NETWORK, "Unrecognized value '" << *enforce_metatraffic << "'"
+                                                                      <<
                     " for 'fastdds.shm.enforce_metatraffic'. Using default value: 'none'");
         }
     }
@@ -166,7 +170,9 @@ bool NetworkFactory::RegisterTransport(
 
             if (is_localhost_allowed)
             {
-                network_configuration_ |= kind;
+                network::add_localhost_capability(
+                    kind,
+                    network_configuration_);
             }
         }
     }
@@ -484,6 +490,23 @@ bool NetworkFactory::getDefaultUnicastLocators(
     return result;
 }
 
+bool NetworkFactory::getDefaultMulticastLocators(
+        LocatorList_t& locators,
+        uint32_t port) const
+{
+    bool result = false;
+    for (auto& transport : mRegisteredTransports)
+    {
+        const MulticastTransportInterface* multicast_transport =
+                dynamic_cast<const MulticastTransportInterface*>(transport.get());
+        if (multicast_transport)
+        {
+            result |= multicast_transport->getDefaultMulticastLocators(locators, port);
+        }
+    }
+    return result;
+}
+
 bool NetworkFactory::fill_default_locator_port(
         Locator_t& locator,
         uint32_t port) const
@@ -494,6 +517,26 @@ bool NetworkFactory::fill_default_locator_port(
         if (transport->IsLocatorSupported(locator))
         {
             result |= transport->fillUnicastLocator(locator, port);
+        }
+    }
+    return result;
+}
+
+bool NetworkFactory::fill_default_multicast_locator(
+        Locator_t& locator,
+        uint32_t port) const
+{
+    bool result = false;
+    for (auto& transport : mRegisteredTransports)
+    {
+        if (transport->IsLocatorSupported(locator))
+        {
+            const MulticastTransportInterface* multicast_transport =
+                    dynamic_cast<const MulticastTransportInterface*>(transport.get());
+            if (multicast_transport)
+            {
+                result |= multicast_transport->fillMulticastLocator(locator, port);
+            }
         }
     }
     return result;
@@ -549,7 +592,16 @@ void NetworkFactory::remove_participant_associated_send_resources(
     // all transports and let them decide what to do.
     for (auto& transport : mRegisteredTransports)
     {
-        TCPTransportInterface* tcp_transport = dynamic_cast<TCPTransportInterface*>(transport.get());
+        // A user-registered transport may be a ChainingTransport that wraps the actual
+        // TCP transport. Walk down the chain until we reach a non-chaining transport so
+        // that the cleanup is invoked on the concrete TCPTransportInterface.
+        TransportInterface* current = transport.get();
+        while (auto* chaining = dynamic_cast<ChainingTransport*>(current))
+        {
+            current = chaining->low_level_transport_.get();
+        }
+
+        TCPTransportInterface* tcp_transport = dynamic_cast<TCPTransportInterface*>(current);
         if (tcp_transport)
         {
             tcp_transport->cleanup_sender_resources(

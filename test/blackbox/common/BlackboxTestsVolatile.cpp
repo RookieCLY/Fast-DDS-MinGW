@@ -12,26 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <gtest/gtest.h>
+
 #include <fastdds/dds/domain/DomainParticipantFactory.hpp>
 #include <fastdds/LibrarySettings.hpp>
 #include <fastdds/rtps/common/CDRMessage_t.hpp>
 #include <fastdds/rtps/transport/test_UDPv4TransportDescriptor.hpp>
-#include <gtest/gtest.h>
+#include <fastdds/dds/domain/qos/RequesterQos.hpp>
 
 #include "BlackboxTests.hpp"
 #include "PubSubReader.hpp"
 #include "PubSubWriter.hpp"
-#include "ReqRepAsReliableHelloWorldReplier.hpp"
-#include "ReqRepAsReliableHelloWorldRequester.hpp"
 
 using namespace eprosima::fastdds;
 
+namespace {
 enum communication_type
 {
     TRANSPORT,
     INTRAPROCESS,
     DATASHARING
 };
+}  // namespace
 
 class Volatile : public testing::TestWithParam<communication_type>
 {
@@ -44,7 +46,8 @@ public:
         {
             case INTRAPROCESS:
                 library_settings.intraprocess_delivery = eprosima::fastdds::IntraprocessDeliveryType::INTRAPROCESS_FULL;
-                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(library_settings);
+                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(
+                    library_settings);
                 break;
             case DATASHARING:
                 enable_datasharing = true;
@@ -62,7 +65,8 @@ public:
         {
             case INTRAPROCESS:
                 library_settings.intraprocess_delivery = eprosima::fastdds::IntraprocessDeliveryType::INTRAPROCESS_OFF;
-                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(library_settings);
+                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(
+                    library_settings);
                 break;
             case DATASHARING:
                 enable_datasharing = false;
@@ -243,18 +247,6 @@ TEST_P(Volatile, AsyncVolatileKeepAllPubReliableSubNonReliableHelloWorld)
     ASSERT_TRUE(data.empty());
     // Block reader until reception finished or timeout.
     reader.block_for_at_least(2);
-}
-
-// Regression test of Refs #3376, github ros2/rmw_fastrtps #226
-TEST_P(Volatile, ReqRepVolatileHelloworldRequesterCheckWriteParams)
-{
-    ReqRepAsReliableHelloWorldRequester requester;
-
-    requester.durability_kind(eprosima::fastdds::dds::VOLATILE_DURABILITY_QOS).init();
-
-    ASSERT_TRUE(requester.isInitialized());
-
-    requester.send(1);
 }
 
 // Test created to check bug #5423, github ros2/ros2 #703

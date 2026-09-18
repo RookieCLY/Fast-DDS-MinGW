@@ -519,7 +519,8 @@ TEST_F(SHMCondition, max_listeners)
     do
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    } while (waiting_threads.load() + wait_exception.load() < threads.size());
+    }
+    while (waiting_threads.load() + wait_exception.load() < threads.size());
 
     std::cout << waiting_threads.load() << " waiting. " << wait_exception.load() << " failed." << std::endl;
 
@@ -762,7 +763,7 @@ TEST_F(SHMTransportTests, send_and_receive_between_ports)
                 Locators locators_end(locator_list.end());
 
                 EXPECT_TRUE(send_resource_list.at(0)->send(buffer_list, 5, &locators_begin, &locators_end,
-                        (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+                        (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
             };
 
     std::unique_ptr<std::thread> sender_thread;
@@ -826,7 +827,7 @@ TEST_F(SHMTransportTests, port_and_segment_overflow_discard)
         buffer_list_big.emplace_back(message_big, 4096);
 
         EXPECT_TRUE(send_resource_list.at(0)->send(buffer_list_big, sizeof(message_big), &locators_begin, &locators_end,
-                (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+                (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
     }
 
     // At least 4 msgs of 4 bytes are allowed
@@ -837,7 +838,7 @@ TEST_F(SHMTransportTests, port_and_segment_overflow_discard)
 
         // At least 4 msgs of 4 bytes are allowed
         EXPECT_TRUE(send_resource_list.at(0)->send(buffer_list, sizeof(message), &locators_begin, &locators_end,
-                (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+                (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
     }
 
     // Wait until the receiver get the first message
@@ -855,7 +856,7 @@ TEST_F(SHMTransportTests, port_and_segment_overflow_discard)
         Locators locators_end(locator_list.end());
 
         EXPECT_TRUE(send_resource_list.at(0)->send(buffer_list, sizeof(message), &locators_begin, &locators_end,
-                (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+                (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
     }
 
     // Push a 5th will not cause overflow
@@ -864,7 +865,7 @@ TEST_F(SHMTransportTests, port_and_segment_overflow_discard)
         Locators locators_end(locator_list.end());
 
         EXPECT_TRUE(send_resource_list.at(0)->send(buffer_list, sizeof(message), &locators_begin, &locators_end,
-                (std::chrono::steady_clock::now() + std::chrono::microseconds(100))));
+                (std::chrono::steady_clock::now() + std::chrono::microseconds(100)), 0));
     }
 
     sem.disable();
@@ -1364,6 +1365,51 @@ TEST_F(SHMTransportTests, dead_listener_sender_port_recover)
 
     deadlocked_port->close_listener(&is_listener_closed);
     thread_wait_deadlock.join();
+}
+
+// Regression test for https://github.com/eProsima/Fast-DDS/issues/6501
+// Reproduces a crash when opening a port whose segment holds damaged allocator
+// structures.
+//
+// open_port_internal validates an existing segment with check_sanity(), which
+// iterates the allocator's free-block tree through offset pointers stored inside
+// the segment. When those links are inconsistent the traversal reads unmapped
+// memory and the process dies (0xC0000005 on Windows, SIGSEGV elsewhere). The
+// fault is not a C++ exception, so the catch(std::exception&) around the call
+// cannot intercept it.
+//
+// Note the port here is open and owned, so this is not about stale or leftover
+// segments: ownership does not protect the traversal.
+//
+// On platforms without gtest's SEH handling this aborts the whole test binary
+// rather than failing one case.
+TEST_F(SHMTransportTests, port_corrupt_segment_recovers_on_open)
+{
+    auto shared_mem_manager = SharedMemManager::create(domain_name);
+    SharedMemGlobal* shared_mem_global = shared_mem_manager->global_segment();
+    MockPortSharedMemGlobal port_mocker;
+
+    shared_mem_global->remove_port(0);
+
+    auto test_case = [&](uint8_t corrupt_byte)
+    {
+        auto port = shared_mem_global->open_port(0, 1, 1000);
+        ASSERT_NO_THROW(port->healthy_check());
+
+        // Damage the allocator structures the way an abruptly terminated peer can.
+        port_mocker.corrupt_segment_allocator(*port, corrupt_byte);
+
+        // Opening the port again should not walk those structures.
+        auto recovered = shared_mem_global->open_port(0, 1, 1000);
+        ASSERT_TRUE(recovered != nullptr);
+        ASSERT_NO_THROW(recovered->healthy_check());
+    };
+
+    for (uint8_t corrupt_byte = 0xFF; corrupt_byte > 0x00; corrupt_byte--)
+    {
+        test_case(corrupt_byte);
+    }
+    test_case(0x00);
 }
 
 TEST_F(SHMTransportTests, port_not_ok_listener_recover)
@@ -2118,7 +2164,7 @@ TEST_F(SHMTransportTests, dump_file)
                     Locators locators_end(locator_list.end());
 
                     EXPECT_TRUE(send_resource_list.at(0)->send(buffer_list, 5, &locators_begin, &locators_end,
-                            (std::chrono::steady_clock::now() + std::chrono::microseconds(1000))));
+                            (std::chrono::steady_clock::now() + std::chrono::microseconds(1000)), 0));
                 };
 
         std::unique_ptr<std::thread> sender_thread;

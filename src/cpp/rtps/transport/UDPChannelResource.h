@@ -15,7 +15,7 @@
 #ifndef _FASTDDS_UDP_CHANNEL_RESOURCE_INFO_
 #define _FASTDDS_UDP_CHANNEL_RESOURCE_INFO_
 
-#include <asio.hpp>
+#include "../network/asio.hpp"
 
 #include <fastdds/rtps/attributes/ThreadSettings.hpp>
 #include <fastdds/rtps/common/Locator.hpp>
@@ -38,8 +38,8 @@ class eProsimaUDPSocket : public asio::ip::udp::socket
 public:
 
     explicit eProsimaUDPSocket(
-            asio::io_service& io_service)
-        : asio::ip::udp::socket(io_service)
+            asio::io_context& io_context)
+        : asio::ip::udp::socket(io_context)
     {
     }
 
@@ -74,9 +74,9 @@ inline eProsimaUDPSocket moveSocket(
 }
 
 inline eProsimaUDPSocket createUDPSocket(
-        asio::io_service& io_service)
+        asio::io_context& io_context)
 {
-    return eProsimaUDPSocket(io_service);
+    return eProsimaUDPSocket(io_context);
 }
 
 inline eProsimaUDPSocket& getRefFromPtr(
@@ -92,8 +92,8 @@ class eProsimaUDPSocket : public std::shared_ptr<asio::ip::udp::socket>
 public:
 
     explicit eProsimaUDPSocket(
-            asio::io_service& io_service)
-        : shared_ptr<asio::ip::udp::socket>(io_service)
+            asio::io_context& io_context)
+        : shared_ptr<asio::ip::udp::socket>(io_context)
     {
     }
 
@@ -128,9 +128,9 @@ inline eProsimaUDPSocket moveSocket(
 }
 
 inline eProsimaUDPSocket createUDPSocket(
-        asio::io_service& io_service)
+        asio::io_context& io_context)
 {
-    return eProsimaUDPSocket(io_service);
+    return eProsimaUDPSocket(io_context);
 }
 
 inline eProsimaUDPSocket getRefFromPtr(

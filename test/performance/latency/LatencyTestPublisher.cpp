@@ -57,11 +57,6 @@ LatencyTestPublisher::LatencyTestPublisher()
 
 LatencyTestPublisher::~LatencyTestPublisher()
 {
-    std::string TestCommandType("TestCommandType");
-    participant_->unregister_type(TestCommandType);
-
-    DomainParticipantFactory::get_instance()->delete_participant(participant_);
-
     EPROSIMA_LOG_INFO(LatencyTest, "Pub: Participant removed");
 }
 
@@ -485,10 +480,13 @@ void LatencyTestPublisher::CommandReaderListener::on_data_available(
     TestCommandType command;
     SampleInfo info;
 
-    if (reader->take_next_sample(
-                &command, &info) == RETCODE_OK
-            && info.valid_data)
+    while (reader->take_next_sample(&command, &info) == RETCODE_OK)
     {
+        if (!info.valid_data)
+        {
+            continue;
+        }
+
         if (command.m_command == BEGIN
                 || command.m_command == END )
         {
@@ -497,10 +495,6 @@ void LatencyTestPublisher::CommandReaderListener::on_data_available(
             latency_publisher_->mutex_.unlock();
             latency_publisher_->command_msg_cv_.notify_one();
         }
-    }
-    else
-    {
-        EPROSIMA_LOG_INFO(LatencyTest, "Problem reading command message");
     }
 }
 
@@ -513,110 +507,150 @@ void LatencyTestPublisher::LatencyDataReaderListener::on_data_available(
     LoanableSequence<LatencyType> data_seq;
     std::chrono::duration<uint32_t, std::nano> bounce_time(0);
 
-    if (pub->data_loans_)
+    ReturnCode_t ret_code = RETCODE_OK;
+    while (RETCODE_OK == ret_code)
     {
-        if (RETCODE_OK != reader->take(data_seq, infos, 1))
-        {
-            EPROSIMA_LOG_ERROR(LatencyTest, "Problem reading Subscriber echoed loaned test data");
-            return;
-        }
-    }
-    else
-    {
-        SampleInfo info;
-        void* data = pub->dynamic_types_ ?
-                (void*)pub->dynamic_data_in_:
-                (void*)pub->latency_data_in_;
-
-        // Retrieved echoed data
-        if (reader->take_next_sample(
-                    data, &info) != RETCODE_OK
-                || !info.valid_data)
-        {
-            EPROSIMA_LOG_ERROR(LatencyTest, "Problem reading Subscriber echoed test data");
-            return;
-        }
-    }
-
-    // Atomic managemente of the sample
-    bool notify = false;
-    {
-        std::lock_guard<std::mutex> lock(pub->mutex_);
-
         if (pub->data_loans_)
         {
-            // we have requested a single sample
-            assert(infos.length() == 1 && data_seq.length() == 1);
-            // we have already released the former loan
-            assert(pub->latency_data_in_ == nullptr);
-            // reference the loaned data
-            pub->latency_data_in_ = &data_seq[0];
-            // retrieve the bounce time
-            bounce_time = std::chrono::duration<uint32_t, std::nano>(pub->latency_data_in_->bounce);
-        }
-
-        // Check if is the expected echo message
-        uint32_t dyn_value_in {0};
-        uint32_t dyn_value_out {0};
-        if (pub->dynamic_types_)
-        {
-            (*pub->dynamic_data_in_)->get_uint32_value(dyn_value_in, 0);
-            (*pub->dynamic_data_out_)->get_uint32_value(dyn_value_out, 0);
-        }
-
-        if ((pub->dynamic_types_ && dyn_value_in != dyn_value_out)
-                || (!pub->dynamic_types_ && pub->latency_data_in_->seqnum != pub->latency_data_out_->seqnum))
-        {
-            EPROSIMA_LOG_INFO(LatencyTest, "Echo message received is not the expected one");
+            ret_code = reader->take(data_seq, infos, 1);
+            if (RETCODE_OK != ret_code)
+            {
+                if (RETCODE_NO_DATA != ret_code)
+                {
+                    EPROSIMA_LOG_ERROR(LatencyTest, "Problem reading Subscriber echoed loaned test data");
+                }
+                return;
+            }
         }
         else
         {
-            // Factor of 2 below is to calculate the roundtrip divided by two. Note that nor the overhead does not
-            // need to be halved, as we access the clock twice per round trip
-            pub->end_time_ = std::chrono::steady_clock::now();
-            pub->end_time_ -= bounce_time;
-            auto roundtrip = std::chrono::duration<double, std::micro>(pub->end_time_ - pub->start_time_) / 2.0;
-            roundtrip -= pub->overhead_time_;
+            SampleInfo info;
+            void* data = pub->dynamic_types_ ?
+                    (void*)pub->dynamic_data_in_:
+                    (void*)pub->latency_data_in_;
 
-            // Discard samples were loan failed due to payload outages
-            // in that case the roundtrip will match the os scheduler quantum slice
-            if (roundtrip.count() > 0
-                    && !(pub->data_loans_ && roundtrip.count() > 10000))
+            // Retrieved echoed data
+            ret_code = reader->take_next_sample(data, &info);
+            if (RETCODE_OK != ret_code)
             {
-                pub->times_.push_back(roundtrip);
-                ++pub->received_count_;
+                if (RETCODE_NO_DATA != ret_code)
+                {
+                    EPROSIMA_LOG_ERROR(LatencyTest, "Problem reading Subscriber echoed test data");
+                }
+                return;
             }
 
-            // Reset seqnum from out data
+            if (!info.valid_data)
+            {
+                // No valid data, continue to next sample
+                continue;
+            }
+        }
+
+        // Atomic management of the sample
+        bool notify = false;
+        LatencyType* loaned_data_in = nullptr;
+        // This loop allows us to the scope of the lock_guard without using goto.
+        // We need this to avoid calling return_loan() while the mutex is locked, as it
+        // may cause an ABBA deadlock.
+        while (true)
+        {
+            std::lock_guard<std::mutex> lock(pub->mutex_);
+
+            if (pub->data_loans_)
+            {
+                // we have requested a single sample
+                assert(infos.length() == 1 && data_seq.length() == 1);
+                // we have already released the former loan
+                assert(loaned_data_in == nullptr);
+                // check if the sample is valid
+                if (!infos[0].valid_data)
+                {
+                    // Avoid processing when the sample does not have data
+                    break;
+                }
+                // reference the loaned data
+                loaned_data_in = &data_seq[0];
+                // retrieve the bounce time
+                bounce_time = std::chrono::duration<uint32_t, std::nano>(loaned_data_in->bounce);
+            }
+
+            // Check if is the expected echo message
+            uint32_t value_in {0};
+            uint32_t value_out {1u};
             if (pub->dynamic_types_)
             {
-                (*pub->dynamic_data_out_)->set_uint32_value(0, 0);
+                (*pub->dynamic_data_in_)->get_uint32_value(value_in, 0);
+                (*pub->dynamic_data_out_)->get_uint32_value(value_out, 0);
+            }
+            else if ((nullptr != pub->latency_data_in_) && (nullptr != pub->latency_data_out_))
+            {
+                value_in = pub->latency_data_in_->seqnum;
+                value_out = pub->latency_data_out_->seqnum;
+            }
+            else if (pub->data_loans_ &&
+                    (nullptr != loaned_data_in) && (nullptr != pub->latency_data_out_))
+            {
+                value_in = loaned_data_in->seqnum;
+                value_out = pub->latency_data_out_->seqnum;
+            }
+
+            if (value_in != value_out)
+            {
+                EPROSIMA_LOG_INFO(LatencyTest, "Echo message received is not the expected one");
             }
             else
             {
-                pub->latency_data_out_->seqnum = 0;
+                // Factor of 2 below is to calculate the roundtrip divided by two. Note that nor the overhead does not
+                // need to be halved, as we access the clock twice per round trip
+                pub->end_time_ = std::chrono::steady_clock::now();
+                pub->end_time_ -= bounce_time;
+                auto roundtrip = std::chrono::duration<double, std::micro>(pub->end_time_ - pub->start_time_) / 2.0;
+                roundtrip -= pub->overhead_time_;
+
+                // Discard samples were loan failed due to payload outages
+                // in that case the roundtrip will match the os scheduler quantum slice
+                if (roundtrip.count() > 0
+                        && !(pub->data_loans_ && roundtrip.count() > 10000))
+                {
+                    pub->times_.push_back(roundtrip);
+                    ++pub->received_count_;
+                }
+
+                // Reset seqnum from out data
+                if (pub->dynamic_types_)
+                {
+                    (*pub->dynamic_data_out_)->set_uint32_value(0, 0);
+                }
+                else
+                {
+                    pub->latency_data_out_->seqnum = 0;
+                }
             }
+
+            if (pub->data_loans_)
+            {
+                loaned_data_in = nullptr;
+            }
+
+            ++pub->data_msg_count_;
+            notify = pub->data_msg_count_ >= pub->subscribers_;
+
+            // Break the loop (i.e. exit the lock_guard scope)
+            break;
         }
 
-        if (pub->data_loans_)
+        if (notify)
         {
-            pub->latency_data_in_ = nullptr;
+            pub->data_msg_cv_.notify_one();
         }
 
-        ++pub->data_msg_count_;
-        notify = pub->data_msg_count_ >= pub->subscribers_;
-    }
-
-    if (notify)
-    {
-        pub->data_msg_cv_.notify_one();
-    }
-
-    // release the loan if any
-    if (pub->data_loans_
-            && RETCODE_OK != reader->return_loan(data_seq, infos))
-    {
-        EPROSIMA_LOG_ERROR(LatencyTest, "Problem returning loaned test data");
+        // release the loan if any
+        if (pub->data_loans_
+                && RETCODE_OK != reader->return_loan(data_seq, infos))
+        {
+            EPROSIMA_LOG_ERROR(LatencyTest, "Problem returning loaned test data");
+        }
     }
 }
 
@@ -661,28 +695,11 @@ void LatencyTestPublisher::run()
 
 void LatencyTestPublisher::destroy_user_entities()
 {
-    // Static type endpoints should have been removed for each payload iteration
-    if (dynamic_types_)
-    {
-        destroy_data_endpoints();
-    }
-    else if (nullptr != data_writer_
-            || nullptr != data_reader_
-            || nullptr != latency_data_pub_topic_
-            || nullptr != latency_data_sub_topic_
-            || !latency_data_type_)
-    {
-        EPROSIMA_LOG_ERROR(LATENCYPUBLISHER, "ERROR unregistering the DATA type and/or removing the endpoints");
-    }
+    // Delete DDS entities contained within the DomainParticipant
+    participant_->delete_contained_entities();
 
-    subscriber_->delete_datareader(command_reader_);
-    participant_->delete_subscriber(subscriber_);
-
-    publisher_->delete_datawriter(command_writer_);
-    participant_->delete_publisher(publisher_);
-
-    participant_->delete_topic(latency_command_sub_topic_);
-    participant_->delete_topic(latency_command_pub_topic_);
+    // Delete DomainParticipant
+    DomainParticipantFactory::get_instance()->delete_participant(participant_);
 }
 
 void LatencyTestPublisher::export_csv(
@@ -808,14 +825,13 @@ bool LatencyTestPublisher::test(
             // loan each sample
             if (data_loans_)
             {
-                latency_data_in_ = nullptr;
+                assert(latency_data_in_ == nullptr);
                 int trials = 10;
                 bool loaned = false;
 
                 while (trials-- != 0 && !loaned)
                 {
-                    loaned = (RETCODE_OK
-                            ==  data_writer_->loan_sample(
+                    loaned = (RETCODE_OK ==  data_writer_->loan_sample(
                                 data,
                                 DataWriter::LoanInitializationKind::NO_LOAN_INITIALIZATION));
 
@@ -925,7 +941,13 @@ bool LatencyTestPublisher::test(
     }
 
     // Drop the first measurement, as it's usually not representative
-    times_.erase(times_.begin());
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!times_.empty())
+        {
+            times_.erase(times_.begin());
+        }
+    }
 
     // Log all data to CSV file if specified
     if (raw_data_file_ != "")
@@ -947,8 +969,11 @@ void LatencyTestPublisher::analyze_times(
     stats.received_ = received_count_ - 1;  // Because we are not counting the first one.
     stats.minimum_ = *min_element(times_.begin(), times_.end());
     stats.maximum_ = *max_element(times_.begin(), times_.end());
-    stats.mean_ = accumulate(times_.begin(), times_.end(),
-                    std::chrono::duration<double, std::micro>(0)).count() / times_.size();
+    if (times_.size() > 0)
+    {
+        stats.mean_ = accumulate(times_.begin(), times_.end(),
+                        std::chrono::duration<double, std::micro>(0)).count() / times_.size();
+    }
 
     double aux_stdev = 0;
     for (std::vector<std::chrono::duration<double, std::micro>>::iterator tit = times_.begin(); tit != times_.end();
@@ -956,7 +981,10 @@ void LatencyTestPublisher::analyze_times(
     {
         aux_stdev += pow(((*tit).count() - stats.mean_), 2);
     }
-    aux_stdev = sqrt(aux_stdev / times_.size());
+    if (times_.size() > 0)
+    {
+        aux_stdev = sqrt(aux_stdev / times_.size());
+    }
     stats.stdev_ = aux_stdev;
 
     /* Percentiles */
@@ -1029,12 +1057,17 @@ void LatencyTestPublisher::print_stats(
 void LatencyTestPublisher::export_raw_data(
         uint32_t datasize)
 {
+    std::vector<std::chrono::duration<double, std::micro>> times_copy;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        times_copy = times_;
+    }
+
     std::ofstream data_file;
     data_file.open(raw_data_file_, std::fstream::app);
-    for (std::vector<std::chrono::duration<double, std::micro>>::iterator tit = times_.begin(); tit != times_.end();
-            ++tit)
+    for (const auto& t : times_copy)
     {
-        data_file << ++raw_sample_count_ << "," << datasize << "," << (*tit).count() << std::endl;
+        data_file << ++raw_sample_count_ << "," << datasize << "," << t.count() << std::endl;
     }
     data_file.close();
 }

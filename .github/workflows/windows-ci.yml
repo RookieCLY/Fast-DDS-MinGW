@@ -23,6 +23,11 @@ on:
         description: 'Branch or tag of Fast DDS repository (https://github.com/eProsima/Fast-DDS)'
         type: string
         required: true
+      run-tests:
+        description: 'Run test suite of Fast DDS'
+        required: false
+        type: boolean
+        default: true
 
   pull_request:
     types:
@@ -38,10 +43,7 @@ concurrency:
 
 jobs:
   windows-ci:
-    if: ${{ (
-              !contains(github.event.pull_request.labels.*.name, 'skip-ci') &&
-              !contains(github.event.pull_request.labels.*.name, 'conflicts')
-            ) }}
+    if: ${{ !(github.event_name == 'pull_request') || !contains(github.event.pull_request.labels.*.name, 'conflicts') }}
     uses: ./.github/workflows/reusable-windows-ci.yml
     with:
       label: ${{ inputs.label || 'windows-ci' }}
@@ -49,3 +51,11 @@ jobs:
       cmake-args: '-DSECURITY=ON ${{ inputs.cmake-args }}'
       ctest-args: ${{ inputs.ctest-args }}
       fastdds_branch: ${{ inputs.fastdds_branch || github.ref || 'master' }}
+      run-build: ${{ !(github.event_name == 'pull_request') ||
+                     !contains(github.event.pull_request.labels.*.name, 'skip-ci') }}
+      run-tests: ${{ (inputs.run-tests == true) ||
+                     (
+                       (github.event_name == 'pull_request') &&
+                       (!contains(github.event.pull_request.labels.*.name, 'no-test')) &&
+                       (!contains(github.event.pull_request.labels.*.name, 'skip-ci'))
+                     ) }}

@@ -18,6 +18,7 @@
 
 #include <rtps/reader/BaseReader.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <mutex>
@@ -35,7 +36,6 @@
 #include <fastdds/rtps/reader/ReaderListener.hpp>
 #include <fastdds/rtps/reader/RTPSReader.hpp>
 
-#include <rtps/builtin/data/ProxyDataConverters.hpp>
 #include <rtps/builtin/data/WriterProxyData.hpp>
 #include <rtps/DataSharing/DataSharingListener.hpp>
 #include <rtps/DataSharing/DataSharingNotification.hpp>
@@ -133,13 +133,9 @@ BaseReader::~BaseReader()
 bool BaseReader::matched_writer_add(
         const PublicationBuiltinTopicData& info)
 {
-    const auto& alloc = mp_RTPSParticipant->get_attributes().allocation;
-    WriterProxyData wdata(
-        alloc.locators.max_unicast_locators,
-        alloc.locators.max_multicast_locators,
-        alloc.data_limits);
+    const auto& alloc = mp_RTPSParticipant->get_const_attributes().allocation;
+    WriterProxyData wdata(alloc.data_limits, info);
 
-    from_builtin_to_proxy(info, wdata);
     return matched_writer_add_edp(wdata);
 }
 
@@ -284,11 +280,38 @@ std::shared_ptr<LocalReaderPointer> BaseReader::get_local_pointer()
 
 bool BaseReader::reserve_cache(
         uint32_t cdr_payload_size,
+        uint16_t fragment_size,
         fastdds::rtps::CacheChange_t*& change)
 {
     std::lock_guard<decltype(mp_mutex)> guard(mp_mutex);
 
     change = nullptr;
+
+    // Calculate and validate required payload size
+    uint32_t reserve_size = fixed_payload_size_ > 0 ? fixed_payload_size_ : cdr_payload_size;
+    uint32_t payload_size = std::min(reserve_size, cdr_payload_size);
+    uint32_t min_required_size = 0;
+    if (!CacheChange_t::calculate_required_fragmented_payload_size(payload_size, fragment_size, min_required_size))
+    {
+        EPROSIMA_LOG_WARNING(RTPS_READER,
+                "Required payload size calculation overflows for payload size '" << payload_size
+                                                                                 << "' and fragment size '"
+                                                                                 << fragment_size << "'");
+        return false;
+    }
+
+    if (min_required_size > reserve_size)
+    {
+        if (fixed_payload_size_ > 0)
+        {
+            EPROSIMA_LOG_WARNING(RTPS_READER,
+                    "Fixed payload size '" << fixed_payload_size_
+                                           << "' is insufficient for fragmentation with fragment size '"
+                                           << fragment_size << "'");
+            return false;
+        }
+        reserve_size = min_required_size;
+    }
 
     fastdds::rtps::CacheChange_t* reserved_change = nullptr;
     if (!change_pool_->reserve_cache(reserved_change))
@@ -297,8 +320,7 @@ bool BaseReader::reserve_cache(
         return false;
     }
 
-    uint32_t payload_size = fixed_payload_size_ ? fixed_payload_size_ : cdr_payload_size;
-    if (!payload_pool_->get_payload(payload_size, reserved_change->serializedPayload))
+    if (!payload_pool_->get_payload(reserve_size, reserved_change->serializedPayload))
     {
         change_pool_->release_cache(reserved_change);
         EPROSIMA_LOG_WARNING(RTPS_READER, "Problem reserving payload from pool");
@@ -481,12 +503,12 @@ bool BaseReader::is_datasharing_compatible_with(
         const fastdds::rtps::WriterProxyData& wdata)
 {
     if (!is_datasharing_compatible_ ||
-            wdata.m_qos.data_sharing.kind() == fastdds::dds::DataSharingKind::OFF)
+            wdata.data_sharing.kind() == fastdds::dds::DataSharingKind::OFF)
     {
         return false;
     }
 
-    for (auto id : wdata.m_qos.data_sharing.domain_ids())
+    for (auto id : wdata.data_sharing.domain_ids())
     {
         if (std::find(m_att.data_sharing_configuration().domain_ids().begin(),
                 m_att.data_sharing_configuration().domain_ids().end(), id)
@@ -522,7 +544,6 @@ void BaseReader::setup_datasharing(
 
     if (att.endpoint.data_sharing_configuration().kind() != fastdds::dds::DataSharingKind::OFF)
     {
-        using std::placeholders::_1;
         std::shared_ptr<DataSharingNotification> notification = DataSharingNotification::create_notification(
             getGuid(), att.endpoint.data_sharing_configuration().shm_directory());
         if (notification)

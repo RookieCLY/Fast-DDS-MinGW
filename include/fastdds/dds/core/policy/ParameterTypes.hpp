@@ -30,6 +30,7 @@
 #include <fastdds/dds/core/Types.hpp>
 #include <fastdds/rtps/common/InstanceHandle.hpp>
 #include <fastdds/rtps/common/Locator.hpp>
+#include <fastdds/rtps/common/OriginalWriterInfo.hpp>
 #include <fastdds/rtps/common/ProductVersion_t.hpp>
 #include <fastdds/rtps/common/SampleIdentity.hpp>
 #include <fastdds/rtps/common/SerializedPayload.hpp>
@@ -173,6 +174,23 @@ enum ParameterId_t : uint16_t
     PID_DATASHARING                         = 0x8006,
     PID_NETWORK_CONFIGURATION_SET           = 0x8007,
     PID_CUSTOM_RELATED_SAMPLE_IDENTITY      = 0x800f,
+    PID_RTPS_ENDPOINT                       = 0x8010,
+    /* Writer specific */
+    PID_WRITER_DATA_LIFECYCLE               = 0x8100,
+    PID_PUBLISH_MODE                        = 0x8101,
+    PID_RTPS_RELIABLE_WRITER                = 0x8102,
+    PID_WRITER_RESOURCE_LIMITS              = 0x8103,
+    /* Reader specific */
+    PID_READER_DATA_LIFECYCLE               = 0x8200,
+    PID_RTPS_RELIABLE_READER                = 0x8201,
+    PID_READER_RESOURCE_LIMITS              = 0x8202,
+    /* Participant specific */
+    PID_WIREPROTOCOL_CONFIG                 = 0x8300,
+    /* RPC specific */
+    PID_RPC_MORE_REPLIES                    = 0x8400,
+
+    /* eProsima Safe DDS extensions */
+    PID_SAFE_DDS_SIGNATURE                  = 0x9000,
 };
 
 /*!
@@ -1220,6 +1238,13 @@ const char* const parameter_enable_monitor_service = "fastdds.enable_monitor_ser
 const char* const parameter_policy_type_propagation = "fastdds.type_propagation";
 
 /**
+ * Parameter property value for configuring serialization of optional QoS in Data(r/w)
+ *
+ * @ingroup PARAMETER_MODULE
+ */
+const char* const parameter_serialize_optional_qos = "fastdds.serialize_optional_qos";
+
+/**
  * @ingroup PARAMETER_MODULE
  */
 class ParameterPropertyList_t : public Parameter_t
@@ -1722,6 +1747,62 @@ public:
 };
 
 #define PARAMETER_SAMPLEIDENTITY_LENGTH 24
+
+/**
+ * @ingroup PARAMETER_MODULE
+ */
+class ParameterOriginalWriterInfo_t : public Parameter_t
+{
+public:
+
+    //! Original Writer Info <br> By default, unknown.
+    fastdds::rtps::OriginalWriterInfo original_writer_info;
+
+    /**
+     * @brief Constructor without parameters
+     */
+    ParameterOriginalWriterInfo_t()
+        : original_writer_info(fastdds::rtps::OriginalWriterInfo::unknown())
+    {
+    }
+
+    /**
+     * Constructor using a parameter PID and the parameter length
+     *
+     * @param pid Pid of the parameter
+     * @param in_length Its associated length
+     */
+    ParameterOriginalWriterInfo_t(
+            ParameterId_t pid,
+            uint16_t in_length)
+        : Parameter_t(pid, in_length)
+        , original_writer_info(fastdds::rtps::OriginalWriterInfo::unknown())
+    {
+    }
+
+    /**
+     * Add the parameter to a CDRMessage_t message.
+     *
+     * @param [in,out] msg Pointer to the message where the parameter should be added.
+     * @return True if the parameter was correctly added.
+     */
+    bool addToCDRMessage(
+            fastdds::rtps::CDRMessage_t* msg) const;
+
+    /**
+     * Read the parameter from a CDRMessage_t message.
+     *
+     * @param [in,out] msg Pointer to the message from where the parameter should be taken.
+     * @param size Size of the parameter field to read
+     * @return True if the parameter was correctly taken.
+     */
+    bool readFromCDRMessage(
+            fastdds::rtps::CDRMessage_t* msg,
+            uint16_t size);
+
+};
+
+#define PARAMETER_ORIGINALWRITERINFO_LENGTH 24
 
 
 #if HAVE_SECURITY

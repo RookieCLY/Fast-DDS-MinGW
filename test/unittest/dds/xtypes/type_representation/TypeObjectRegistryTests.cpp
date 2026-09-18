@@ -21,13 +21,24 @@
 
 #include <fastdds/dds/domain/DomainParticipantFactory.hpp>
 #include <fastdds/dds/xtypes/common.hpp>
+#include <fastdds/dds/xtypes/dynamic_types/DynamicTypeBuilderFactory.hpp>
 #include <fastdds/dds/xtypes/type_representation/TypeObject.hpp>
 #include <fastdds/dds/xtypes/type_representation/TypeObjectUtils.hpp>
+
+#include <fastdds/xtypes/type_representation/TypeObjectRegistry.hpp>
 
 namespace eprosima {
 namespace fastdds {
 namespace dds {
 namespace xtypes {
+
+class TestTypeObjectRegistry : public TypeObjectRegistry
+{
+
+public:
+
+    using TypeObjectRegistry::set_annotation_parameter_value;
+};
 
 // Test TypeObjectRegistry::register_type_object
 TEST(TypeObjectRegistryTests, register_type_object)
@@ -58,6 +69,25 @@ TEST(TypeObjectRegistryTests, register_type_object)
     EXPECT_EQ(eprosima::fastdds::dds::RETCODE_BAD_PARAMETER,
             DomainParticipantFactory::get_instance()->type_object_registry().register_type_object("alias",
             type_object, type_ids));
+}
+
+// Test TypeObjectRegistry::register_type_object
+TEST(TypeObjectRegistryTests, register_type_object_no_name)
+{
+    TypeIdentifier type_id;
+    type_id._d(TK_BYTE);
+    CompleteAliasType complete_alias_type;
+    complete_alias_type.header().detail().type_name("alias_name");
+    CompleteTypeObject type_object;
+    type_object.alias_type(complete_alias_type);
+    complete_alias_type.body().common().related_type(type_id);
+    type_object.alias_type(complete_alias_type);
+
+    TypeIdentifierPair type_ids;
+    TypeObject t;
+    t.complete(type_object);
+    EXPECT_EQ(eprosima::fastdds::dds::RETCODE_OK,
+            DomainParticipantFactory::get_instance()->type_object_registry().register_type_object(t, type_ids));
 }
 
 // Test TypeObjectRegistry::register_type_identifier
@@ -113,6 +143,34 @@ TEST(TypeObjectRegistryTests, get_type_objects)
             DomainParticipantFactory::get_instance()->type_object_registry().get_type_objects("test_name",
             type_objects));
     EXPECT_EQ(type_objects.complete_type_object, type_object);
+}
+
+// Test TypeObjectRegistry::get_complete_type_object
+TEST(TypeObjectRegistryTests, get_complete_type_object)
+{
+    CompleteTypeObject type_object;
+    TypeIdentifierPair type_ids;
+    auto& registry = DomainParticipantFactory::get_instance()->type_object_registry();
+
+    EXPECT_EQ(RETCODE_BAD_PARAMETER, registry.get_complete_type_object(type_ids, type_object));
+
+    EXPECT_EQ(RETCODE_OK, registry.get_type_identifiers(boolean_type_name, type_ids));
+    EXPECT_EQ(RETCODE_BAD_PARAMETER, registry.get_complete_type_object(type_ids, type_object));
+
+    TypeIdentifier alias_type_id;
+    alias_type_id._d(TK_BYTE);
+    CompleteAliasType complete_alias_type;
+    complete_alias_type.header().detail().type_name("alias_name");
+    complete_alias_type.body().common().related_type(alias_type_id);
+    CompleteTypeObject input_type_object;
+    input_type_object.alias_type(complete_alias_type);
+    TypeObject reg_type_object;
+    reg_type_object.complete(input_type_object);
+
+    TypeIdentifierPair reg_type_object_ids;
+    EXPECT_EQ(RETCODE_OK, registry.register_type_object(reg_type_object, reg_type_object_ids));
+    EXPECT_EQ(RETCODE_OK, registry.get_complete_type_object(reg_type_object_ids, type_object));
+    EXPECT_EQ(type_object, input_type_object);
 }
 
 // Test TypeObjectRegistry::get_type_identifiers
@@ -257,6 +315,66 @@ TEST(TypeObjectRegistryTests, get_type_identifiers_primitive_types)
     type_id._d(TK_CHAR16);
     EXPECT_EQ(type_ids.type_identifier1(), type_id);
     EXPECT_EQ(type_ids.type_identifier2(), none_type_id);
+}
+
+// Test TypeObjectRegistry::get_type_information
+TEST(TypeObjectRegistryTests, get_type_information)
+{
+    auto& registry = DomainParticipantFactory::get_instance()->type_object_registry();
+
+    TypeIdentifier type_id;
+    type_id._d(TK_BYTE);
+    CompleteAliasType complete_alias_type;
+    complete_alias_type.header().detail().type_name("alias_name");
+    CompleteTypeObject type_object;
+    type_object.alias_type(complete_alias_type);
+    complete_alias_type.body().common().related_type(type_id);
+    type_object.alias_type(complete_alias_type);
+
+    TypeIdentifierPair type_ids;
+    TypeObject t;
+    t.complete(type_object);
+    EXPECT_EQ(eprosima::fastdds::dds::RETCODE_OK,
+            DomainParticipantFactory::get_instance()->type_object_registry().register_type_object(t, type_ids));
+
+    TypeInformation type_info;
+    EXPECT_EQ(RETCODE_OK, registry.get_type_information(type_ids, type_info, false));
+}
+
+// (MacOS) Regression test for clang/libc++ builds: empty char8 annotation
+// parameters must not route through the string overload
+// and must produce a null character default value instead
+TEST(TypeObjectRegistryTests, set_annotation_parameter_value_empty_char8)
+{
+    TestTypeObjectRegistry registry;
+    AnnotationParameterValue param_value;
+    // Build the primitive char8 type explicitly so the conversion logic is exercised on the
+    // single-character annotation path instead of the string one
+    auto char8_type = DynamicTypeBuilderFactory::get_instance()->get_primitive_type(TK_CHAR8);
+
+    ASSERT_NE(nullptr, char8_type);
+    // An empty textual value for a char8 annotation must still succeed and yield the default
+    // null character rather than being treated as a string payload.
+    EXPECT_EQ(RETCODE_OK, registry.set_annotation_parameter_value(char8_type, "", param_value));
+    EXPECT_EQ(TK_CHAR8, param_value._d());
+    EXPECT_EQ('\0', param_value.char_value());
+}
+
+// (MacOS) Regression test for clang/libc++ builds: non empty char8 annotation
+TEST(TypeObjectRegistryTests, set_annotation_parameter_value_non_empty_char8_uses_first_character)
+{
+    TestTypeObjectRegistry registry;
+    AnnotationParameterValue param_value;
+    // Use the same primitive char8 path to verify how textual input is narrowed into a single
+    // annotation character
+    auto char8_type = DynamicTypeBuilderFactory::get_instance()->get_primitive_type(TK_CHAR8);
+
+    ASSERT_NE(nullptr, char8_type);
+    // For char8 annotations only the first character is significant, even if the provided text
+    // contains more bytes
+    EXPECT_EQ(RETCODE_OK, registry.set_annotation_parameter_value(char8_type, "FastDDS", param_value));
+    EXPECT_EQ(TK_CHAR8, param_value._d());
+    EXPECT_EQ('F', param_value.char_value());
 }
 
 } // xtypes

@@ -29,9 +29,8 @@
 #include <fastdds/rtps/reader/ReaderListener.hpp>
 
 #include "reader_utils.hpp"
-#include "rtps/RTPSDomainImpl.hpp"
+#include "rtps/domain/RTPSDomainImpl.hpp"
 #include <rtps/builtin/BuiltinProtocols.h>
-#include <rtps/builtin/data/ProxyDataConverters.hpp>
 #include <rtps/builtin/liveliness/WLP.hpp>
 #include <rtps/DataSharing/DataSharingListener.hpp>
 #include <rtps/DataSharing/ReaderPool.hpp>
@@ -107,28 +106,34 @@ bool StatelessReader::matched_writer_add_edp(
         std::unique_lock<RecursiveTimedMutex> guard(mp_mutex);
         listener = listener_;
 
+        bool is_same_process = RTPSDomainImpl::should_intraprocess_between(m_guid, wdata.guid);
+        bool is_datasharing = is_datasharing_compatible_with(wdata);
+
         for (RemoteWriterInfo_t& writer : matched_writers_)
         {
-            if (writer.guid == wdata.guid())
+            if (writer.guid == wdata.guid)
             {
                 EPROSIMA_LOG_INFO(RTPS_READER, "Attempting to add existing writer, updating information");
 
                 if (dds::EXCLUSIVE_OWNERSHIP_QOS == m_att.ownershipKind &&
-                        writer.ownership_strength != wdata.m_qos.m_ownershipStrength.value)
+                        writer.ownership_strength != wdata.ownership_strength.value)
                 {
                     history_->writer_update_its_ownership_strength_nts(
-                        writer.guid, wdata.m_qos.m_ownershipStrength.value);
+                        writer.guid, wdata.ownership_strength.value);
                 }
-                writer.ownership_strength = wdata.m_qos.m_ownershipStrength.value;
+                writer.ownership_strength = wdata.ownership_strength.value;
+
+                if (!is_same_process && !is_datasharing)
+                {
+                    mp_RTPSParticipant->createSenderResources(wdata.remote_locators, m_att);
+                }
 
                 if (nullptr != listener)
                 {
                     // call the listener without the lock taken
                     guard.unlock();
-                    PublicationBuiltinTopicData info;
-                    from_proxy_to_builtin(wdata, info);
-                    listener->on_writer_discovery(this, WriterDiscoveryStatus::CHANGED_QOS_WRITER, wdata.guid(),
-                            &info);
+                    listener->on_writer_discovery(this, WriterDiscoveryStatus::CHANGED_QOS_WRITER, wdata.guid,
+                            &wdata);
                 }
 
 #ifdef FASTDDS_STATISTICS
@@ -144,28 +149,25 @@ bool StatelessReader::matched_writer_add_edp(
             }
         }
 
-        bool is_same_process = RTPSDomainImpl::should_intraprocess_between(m_guid, wdata.guid());
-        bool is_datasharing = is_datasharing_compatible_with(wdata);
-
         RemoteWriterInfo_t info;
-        info.guid = wdata.guid();
-        info.persistence_guid = wdata.persistence_guid();
-        info.has_manual_topic_liveliness = (dds::MANUAL_BY_TOPIC_LIVELINESS_QOS == wdata.m_qos.m_liveliness.kind);
+        info.guid = wdata.guid;
+        info.persistence_guid = wdata.persistence_guid;
+        info.has_manual_topic_liveliness = (dds::MANUAL_BY_TOPIC_LIVELINESS_QOS == wdata.liveliness.kind);
         info.is_datasharing = is_datasharing;
-        info.ownership_strength = wdata.m_qos.m_ownershipStrength.value;
+        info.ownership_strength = wdata.ownership_strength.value;
 
         if (is_datasharing)
         {
-            if (datasharing_listener_->add_datasharing_writer(wdata.guid(),
+            if (datasharing_listener_->add_datasharing_writer(wdata.guid,
                     m_att.durabilityKind == VOLATILE,
                     history_->m_att.maximumReservedCaches))
             {
-                EPROSIMA_LOG_INFO(RTPS_READER, "Writer Proxy " << wdata.guid() << " added to " << this->m_guid.entityId
+                EPROSIMA_LOG_INFO(RTPS_READER, "Writer Proxy " << wdata.guid << " added to " << this->m_guid.entityId
                                                                << " with data sharing");
             }
             else
             {
-                EPROSIMA_LOG_ERROR(RTPS_READER, "Failed to add Writer Proxy " << wdata.guid()
+                EPROSIMA_LOG_ERROR(RTPS_READER, "Failed to add Writer Proxy " << wdata.guid
                                                                               << " to " << this->m_guid.entityId
                                                                               << " with data sharing.");
                 return false;
@@ -175,14 +177,14 @@ bool StatelessReader::matched_writer_add_edp(
 
         if (matched_writers_.emplace_back(info) == nullptr)
         {
-            EPROSIMA_LOG_WARNING(RTPS_READER, "No space to add writer " << wdata.guid() << " to reader " << m_guid);
+            EPROSIMA_LOG_WARNING(RTPS_READER, "No space to add writer " << wdata.guid << " to reader " << m_guid);
             if (is_datasharing)
             {
-                datasharing_listener_->remove_datasharing_writer(wdata.guid());
+                datasharing_listener_->remove_datasharing_writer(wdata.guid);
             }
             return false;
         }
-        EPROSIMA_LOG_INFO(RTPS_READER, "Writer " << wdata.guid() << " added to reader " << m_guid);
+        EPROSIMA_LOG_INFO(RTPS_READER, "Writer " << wdata.guid << " added to reader " << m_guid);
 
         add_persistence_guid(info.guid, info.persistence_guid);
 
@@ -195,6 +197,11 @@ bool StatelessReader::matched_writer_add_edp(
             // this has to be done after the writer is added to the matched_writers or the processing may fail
             datasharing_listener_->notify(false);
         }
+
+        if (!is_same_process && !is_datasharing)
+        {
+            mp_RTPSParticipant->createSenderResources(wdata.remote_locators, m_att);
+        }
     }
 
     if (liveliness_lease_duration_ < dds::c_TimeInfinite)
@@ -203,7 +210,7 @@ bool StatelessReader::matched_writer_add_edp(
         if ( wlp != nullptr)
         {
             wlp->sub_liveliness_manager_->add_writer(
-                wdata.guid(),
+                wdata.guid,
                 liveliness_kind_,
                 liveliness_lease_duration_);
         }
@@ -215,9 +222,7 @@ bool StatelessReader::matched_writer_add_edp(
 
     if (nullptr != listener)
     {
-        PublicationBuiltinTopicData info;
-        from_proxy_to_builtin(wdata, info);
-        listener->on_writer_discovery(this, WriterDiscoveryStatus::DISCOVERED_WRITER, wdata.guid(), &info);
+        listener->on_writer_discovery(this, WriterDiscoveryStatus::DISCOVERED_WRITER, wdata.guid, &wdata);
     }
 
 #ifdef FASTDDS_STATISTICS
@@ -377,7 +382,12 @@ bool StatelessReader::change_received(
             }
             ++total_unread_;
 
-            on_data_notify(guid, change->sourceTimestamp);
+
+            // Statistics callback is called with the original writer GUID if it is set
+            auto statistics_source_guid = change->write_params.original_writer_info() != OriginalWriterInfo::unknown() ?
+                    change->write_params.original_writer_info().original_writer_guid() : guid;
+
+            on_data_notify(statistics_source_guid, change->sourceTimestamp);
 
             auto listener = get_listener();
             if (listener != nullptr)
@@ -508,7 +518,8 @@ bool StatelessReader::begin_sample_access_nts(
 void StatelessReader::end_sample_access_nts(
         CacheChange_t* change,
         WriterProxy*& /*writer*/,
-        bool mark_as_read)
+        bool mark_as_read,
+        bool /*should_send_ack*/)
 {
     // Mark change as read
     if (mark_as_read && !change->isRead)
@@ -606,7 +617,8 @@ bool StatelessReader::process_data_msg(
                 {
                     update_last_notified(change->writerGUID, change->sequenceNumber);
                 }
-                return false;
+                // Could process later when `will_never_be_accepted` is false
+                return will_never_be_accepted;
             }
 
             if (!fastdds::rtps::change_is_relevant_for_filter(*change, m_guid, data_filter_))
@@ -621,8 +633,10 @@ bool StatelessReader::process_data_msg(
             if (!change_pool_->reserve_cache(change_to_add))
             {
                 EPROSIMA_LOG_WARNING(RTPS_MSG_IN,
-                        IDSTRING "Reached the maximum number of samples allowed by this reader's QoS. Rejecting change for reader: " <<
-                        m_guid );
+                        IDSTRING
+                        "Reached the maximum number of samples allowed by this reader's QoS. Rejecting change for reader: "
+                        << m_guid );
+                // Could process later when a cache is available
                 return false;
             }
 
@@ -648,9 +662,20 @@ bool StatelessReader::process_data_msg(
                     EPROSIMA_LOG_WARNING(RTPS_MSG_IN, IDSTRING "Problem copying DataSharing CacheChange from writer "
                             << change->writerGUID);
                     change_pool_->release_cache(change_to_add);
-                    return false;
+                    // No datasharing pool available, irrecoverable error.
+                    return true;
                 }
                 datasharing_pool->get_datasharing_change(change->serializedPayload, *change_to_add);
+            }
+            else if (change->serializedPayload.length == 0 && change->kind != ChangeKind_t::ALIVE &&
+                    change->instanceHandle.isDefined())
+            {
+                // A UNREGISTER or DISPOSE status change was sent without payload, but calling get_payload with size 0 might fail
+                // depending on the configured payload pool. However, those operations are still valid iff instanceHandle is defined
+                // so they are handled in this special case
+                // These conditions were already checked in change_is_relevant_for_filter, but it makes sense to have a proper case
+                // here
+                change_to_add->serializedPayload.length = 0;
             }
             else if (payload_pool_->get_payload(change->serializedPayload, change_to_add->serializedPayload))
             {
@@ -666,6 +691,7 @@ bool StatelessReader::process_data_msg(
                         << m_guid << " is "
                         << (fixed_payload_size_ > 0 ? fixed_payload_size_ : (std::numeric_limits<uint32_t>::max)()));
                 change_pool_->release_cache(change_to_add);
+                // Could process later when a payload is available
                 return false;
             }
 
@@ -674,9 +700,13 @@ bool StatelessReader::process_data_msg(
             {
                 EPROSIMA_LOG_INFO(RTPS_MSG_IN,
                         IDSTRING "MessageReceiver not add change " << change_to_add->sequenceNumber);
-                change_to_add->serializedPayload.payload_owner->release_payload(change_to_add->serializedPayload);
+                if (change_to_add->serializedPayload.payload_owner)
+                {
+                    change_to_add->serializedPayload.payload_owner->release_payload(change_to_add->serializedPayload);
+                }
                 change_pool_->release_cache(change_to_add);
-                return false;
+                // A change with a higher sequence number was already received, so this one is discarded forever
+                return true;
             }
         }
     }
@@ -714,8 +744,8 @@ bool StatelessReader::process_data_frag_msg(
             if (!thereIsUpperRecordOf(writer_guid, incomingChange->sequenceNumber))
             {
                 EPROSIMA_LOG_INFO(RTPS_MSG_IN,
-                        IDSTRING "Trying to add fragment " << incomingChange->sequenceNumber.to64long() <<
-                        " TO reader: " << m_guid);
+                        IDSTRING "Trying to add fragment " << incomingChange->sequenceNumber.to64long()
+                                                           << " TO reader: " << m_guid);
 
                 // Early return if we already know about a greater sequence number
                 CacheChange_t* work_change = writer.fragmented_change;
@@ -782,7 +812,7 @@ bool StatelessReader::process_data_frag_msg(
                 // Check if a new change should be reserved
                 if (work_change == nullptr)
                 {
-                    if (reserve_cache(sampleSize, work_change))
+                    if (reserve_cache(sampleSize, change_to_add->getFragmentSize(), work_change))
                     {
                         if (work_change->serializedPayload.max_size < sampleSize)
                         {
@@ -836,8 +866,8 @@ bool StatelessReader::process_data_frag_msg(
                     else if (!change_received(change_completed))
                     {
                         EPROSIMA_LOG_INFO(RTPS_MSG_IN,
-                                IDSTRING "MessageReceiver not add change " <<
-                                change_completed->sequenceNumber.to64long());
+                                IDSTRING "MessageReceiver not add change "
+                                << change_completed->sequenceNumber.to64long());
 
                         // Release CacheChange_t.
                         release_cache(change_completed);

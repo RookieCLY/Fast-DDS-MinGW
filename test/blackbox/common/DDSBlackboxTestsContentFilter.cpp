@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -19,6 +20,9 @@
 #include <thread>
 #include <vector>
 
+#include <gtest/gtest.h>
+
+#include <fastdds/dds/builtin/topic/SubscriptionBuiltinTopicData.hpp>
 #include <fastdds/dds/common/InstanceHandle.hpp>
 #include <fastdds/dds/core/ReturnCode.hpp>
 #include <fastdds/dds/domain/DomainParticipantFactory.hpp>
@@ -28,8 +32,12 @@
 #include <fastdds/dds/subscriber/Subscriber.hpp>
 #include <fastdds/LibrarySettings.hpp>
 #include <fastdds/rtps/common/CDRMessage_t.hpp>
+#include <fastdds/rtps/common/EntityId_t.hpp>
+#include <fastdds/rtps/common/Locator.hpp>
+#include <fastdds/rtps/common/LocatorList.hpp>
+#include <fastdds/rtps/common/SequenceNumber.hpp>
 #include <fastdds/rtps/transport/test_UDPv4TransportDescriptor.hpp>
-#include <gtest/gtest.h>
+#include <fastdds/utils/IPLocator.hpp>
 
 #include "../types/HelloWorldTypeObjectSupport.hpp"
 #include "../types/TestRegression3361PubSubTypes.hpp"
@@ -38,6 +46,7 @@
 #include "BlackboxTests.hpp"
 #include "PubSubReader.hpp"
 #include "PubSubWriter.hpp"
+#include "UDPMessageSender.hpp"
 
 namespace eprosima {
 namespace fastdds {
@@ -160,7 +169,8 @@ public:
         {
             case communication_type::INTRAPROCESS:
                 library_settings.intraprocess_delivery = eprosima::fastdds::IntraprocessDeliveryType::INTRAPROCESS_FULL;
-                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(library_settings);
+                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(
+                    library_settings);
                 break;
             case communication_type::DATASHARING:
                 enable_datasharing = true;
@@ -182,7 +192,8 @@ public:
         {
             case communication_type::INTRAPROCESS:
                 library_settings.intraprocess_delivery = eprosima::fastdds::IntraprocessDeliveryType::INTRAPROCESS_OFF;
-                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(library_settings);
+                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(
+                    library_settings);
                 break;
             case communication_type::DATASHARING:
                 break;
@@ -282,7 +293,8 @@ protected:
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     reader->get_subscription_matched_status(status);
-                } while (status.current_count < 1);
+                }
+                while (status.current_count < 1);
             }
 
             return reader;
@@ -327,7 +339,7 @@ protected:
             // Ensure writer is in clean state
             drop_data_on_all_readers();
             EXPECT_TRUE(writer.waitForAllAcked(std::chrono::seconds(5)));
-            EXPECT_EQ(reader->get_unread_count(), 0);
+            EXPECT_EQ(reader->get_unread_count(), 0ull);
 
             // Send 10 samples with index 1 to 10
             auto data = default_helloworld_data_generator();
@@ -359,7 +371,7 @@ protected:
             ReturnCode_t expected_ret;
             expected_ret = expected_samples == 0 ? RETCODE_NO_DATA : RETCODE_OK;
             EXPECT_EQ(expected_ret, reader->take(recv_data, recv_info));
-            EXPECT_EQ(recv_data.length(), expected_samples);
+            EXPECT_EQ(static_cast<uint64_t>(recv_data.length()), expected_samples);
             for (HelloWorldSeq::size_type i = 0;
                     i < recv_data.length() && static_cast<uint32_t>(i) < expected_samples;
                     ++i)
@@ -708,6 +720,536 @@ TEST(DDSContentFilter, OnlyFilterAliveChanges)
     ASSERT_EQ(reader.get_sample_lost_status().total_count, 0);
 }
 
+/**
+ * @test DataWriter Sample prefilter feature
+ *
+ * This test asserts that prefiltering with an active content filter works correctly.
+ * It creates a ContentFilteredTopic an expression that only accepts samples with index <= 6.
+ * On its side, the prefilter is set to only accept samples with 4 < index < 8
+ */
+TEST_P(DDSContentFilter, filter_with_prefilter)
+{
+    // TODO(Mario-DL): Remove when multiple filtering readers case is fixed for data-sharing
+    if (enable_datasharing)
+    {
+        GTEST_SKIP() << "Several filtering readers not correctly working on data sharing";
+    }
+
+    struct CustomUserWriteData : public rtps::WriteParams::UserWriteData
+    {
+        CustomUserWriteData(
+                const uint16_t& upper_bound_idx,
+                const uint16_t& lower_bound_idx )
+            : upper_bound_idx_(upper_bound_idx)
+            , lower_bound_idx_(lower_bound_idx)
+        {
+        }
+
+        uint16_t upper_bound_idx_;
+        uint16_t lower_bound_idx_;
+    };
+
+    struct CustomPreFilter : public eprosima::fastdds::dds::IContentFilter
+    {
+        ~CustomPreFilter() override = default;
+
+        //! Custom filter for the HelloWorld example
+        bool evaluate(
+                const SerializedPayload& payload,
+                const FilterSampleInfo& filter_sample_info,
+                const rtps::GUID_t&) const override
+        {
+            HelloWorldPubSubType hello_world_type_support;
+            HelloWorld hello_world_sample;
+            hello_world_type_support.deserialize(*const_cast<SerializedPayload*>(&payload), &hello_world_sample);
+
+            bool sample_should_be_sent = true;
+
+            auto custom_write_data =
+                    std::static_pointer_cast<CustomUserWriteData>(filter_sample_info.user_write_data);
+
+            // Filter out samples
+            if (hello_world_sample.index() > custom_write_data->upper_bound_idx_ ||
+                    hello_world_sample.index() < custom_write_data->lower_bound_idx_)
+            {
+                sample_should_be_sent = false;
+            }
+            return sample_should_be_sent;
+        }
+
+    };
+
+    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    PubSubReader<HelloWorldPubSubType> reader(TEST_TOPIC_NAME, "index <= %0", {"6"}, true, false, false);
+
+    // Initialize writer and the filtered reader
+    TestState state;
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+
+    // wait for discovery between writer and filtered reader
+    writer.wait_discovery();
+    reader.wait_discovery();
+
+    // Set a prefilter on the filtered reader
+    ASSERT_EQ(writer.set_sample_prefilter(
+                std::make_shared<CustomPreFilter>()),
+            eprosima::fastdds::dds::RETCODE_OK);
+
+    // Set a user write data on the writer to filter out samples 4 < index < 8
+    rtps::WriteParams write_params;
+    write_params.user_write_data(std::make_shared<CustomUserWriteData>(
+                (uint16_t)8u, (uint16_t)4u));
+
+    auto data = default_helloworld_data_generator();
+
+    reader.startReception(data);
+
+    writer.send(data, 50, &write_params);
+
+    // Reader should have received 3 samples
+    ASSERT_EQ(reader.block_for_all(std::chrono::seconds(1)), 3u);
+}
+
+/*!
+ * @test Regression test for https://eprosima.easyredmine.com/issues/23919
+ * This test checks GAP messages are sent correctly when there is one reader with a content filter.
+ * The idea is, in the middle of a GAP sequence, a heartbet period message is sent.
+ */
+TEST_P(DDSContentFilter, CorrectGAPSendingOneReader)
+{
+    int32_t total_count {0};
+    // Set up the reader with a content filter for index 1, 2, and 6
+    PubSubReader<HelloWorldPubSubType> reader(TEST_TOPIC_NAME, "index = 1 OR index = 2 OR index = 6", {}, true, false,
+            false);
+    reader
+            .reliability(RELIABLE_RELIABILITY_QOS)
+            .sample_lost_status_functor([&total_count](const SampleLostStatus& status)
+            {
+                total_count = status.total_count;
+            }).init();
+    ASSERT_TRUE(reader.isInitialized());
+
+    // Set up the writer
+    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    writer
+            .heartbeat_period_seconds(0)
+            .heartbeat_period_nanosec(100000000)
+            .init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    // Wait for discovery
+    reader.wait_discovery();
+    writer.wait_discovery();
+
+    // Send 10 samples
+    auto data = default_helloworld_data_generator();
+
+    decltype(data) expected_data;
+    expected_data.push_back(*data.begin()); // index 1
+    expected_data.push_back(*std::next(data.begin())); // index 2
+    expected_data.push_back(*std::next(data.begin(), 5)); // index 6
+
+    reader.startReception(expected_data);
+
+    writer.send(data, 50);
+
+    // Wait for reception and check
+    reader.block_for_all();
+    ASSERT_EQ(0, total_count);
+}
+
+/*!
+ * @test Regression test for https://eprosima.easyredmine.com/issues/23919
+ * This test checks GAP messages are sent correctly when there is two readers with a content filter.
+ */
+TEST_P(DDSContentFilter, CorrectGAPSendingTwoReader)
+{
+    int32_t total_count {0};
+    int32_t total_count_2 {0};
+    // Set up the reader with a content filter for index 1, 2, and 6
+    PubSubReader<HelloWorldPubSubType> reader(TEST_TOPIC_NAME, "index = 1 OR index = 2 OR index = 6", {}, true, false,
+            false);
+    reader
+            .reliability(RELIABLE_RELIABILITY_QOS)
+            .sample_lost_status_functor([&total_count](const SampleLostStatus& status)
+            {
+                total_count = status.total_count;
+            }).init();
+    ASSERT_TRUE(reader.isInitialized());
+
+    PubSubReader<HelloWorldPubSubType> reader_2(TEST_TOPIC_NAME, "index = 3 OR index = 10", {}, true, false,
+            false);
+    reader_2
+            .reliability(RELIABLE_RELIABILITY_QOS)
+            .sample_lost_status_functor([&total_count_2](const SampleLostStatus& status)
+            {
+                total_count_2 = status.total_count;
+            }).init();
+    ASSERT_TRUE(reader_2.isInitialized());
+
+    // Set up the writer
+    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    writer
+            .heartbeat_period_seconds(0)
+            .heartbeat_period_nanosec(100000000)
+            .init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    // Wait for discovery
+    reader.wait_discovery();
+    reader_2.wait_discovery();
+    writer.wait_discovery(2);
+
+    // Send 10 samples
+    auto data = default_helloworld_data_generator();
+
+    decltype(data) expected_data;
+    expected_data.push_back(*data.begin()); // index 1
+    expected_data.push_back(*std::next(data.begin())); // index 2
+    expected_data.push_back(*std::next(data.begin(), 5)); // index 6
+
+    decltype(data) expected_data_2;
+    expected_data_2.push_back(*std::next(data.begin(), 2)); // index 3
+    expected_data_2.push_back(*std::next(data.begin(), 9)); // index 9
+
+    reader.startReception(expected_data);
+    reader_2.startReception(expected_data_2);
+
+    writer.send(data, 50);
+
+    // Wait for reception and check
+    reader.block_for_all();
+    reader_2.block_for_all();
+    ASSERT_EQ(0, total_count);
+    ASSERT_EQ(0, total_count_2);
+}
+
+/*
+ * Regression test for https://eprosima.easyredmine.com/issues/23265
+ *
+ * This test checks that a DDSSQL content filter can be created with a type name that is different from the one
+ * in the generated type support.
+ */
+TEST(DDSContentFilter, filter_other_type_name)
+{
+    using namespace eprosima::fastdds;
+
+    // Create a DomainParticipant
+    DomainParticipant* participant =
+            dds::DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+    ASSERT_NE(participant, nullptr);
+
+    // Create a ContentFilteredTopic with a different type name
+    dds::TypeSupport type_support(new HelloWorldPubSubType());
+    ASSERT_EQ(type_support.register_type(participant, "CustomType"), RETCODE_OK);
+    dds::Topic* topic = participant->create_topic(
+        "TestTopic", "CustomType", TOPIC_QOS_DEFAULT);
+    ASSERT_NE(topic, nullptr);
+    dds::ContentFilteredTopic* filtered_topic = participant->create_contentfilteredtopic(
+        "FilteredTopic", topic, "index <= %0", { "6" });
+    ASSERT_NE(filtered_topic, nullptr);
+
+    // Delete all entities
+    ASSERT_EQ(participant->delete_contained_entities(), RETCODE_OK);
+    ASSERT_EQ(dds::DomainParticipantFactory::get_instance()->delete_participant(participant), RETCODE_OK);
+}
+
+/*
+ * Regression test for https://eprosima.easyredmine.com/issues/24038
+ *
+ * This test checks that reusing a ReaderProxy object when a new DataReader is matched does not lead to incorrect
+ * behaviour due to poorly initialised data.
+ */
+TEST(DDSContentFilter, reusing_reader_proxy)
+{
+    int32_t total_count {0};
+    int32_t total_count_2 {0};
+
+    PubSubReader<HelloWorldPubSubType> reader(TEST_TOPIC_NAME, "index = 1 OR index = 2 OR index = 6", {}, true, false,
+            false);
+    reader
+            .reliability(RELIABLE_RELIABILITY_QOS)
+            .durability_kind(TRANSIENT_LOCAL_DURABILITY_QOS)
+            .sample_lost_status_functor([&total_count](const SampleLostStatus& status)
+            {
+                total_count = status.total_count;
+            }).init();
+    ASSERT_TRUE(reader.isInitialized());
+
+    auto udp_transport = std::make_shared<UDPv4TransportDescriptor>();
+
+    // Set up the writer
+    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    writer
+            .add_user_transport_to_pparams(udp_transport)
+            .disable_builtin_transport()
+            .durability_kind(TRANSIENT_LOCAL_DURABILITY_QOS)
+            .history_depth(10)
+    //.heartbeat_period_seconds(100)
+            .init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    // Wait for discovery
+    reader.wait_discovery();
+    writer.wait_discovery();
+
+    // Send 10 samples
+    auto data = default_helloworld_data_generator();
+
+    decltype(data) expected_data;
+    expected_data.push_back(*data.begin()); // index 1
+    expected_data.push_back(*std::next(data.begin())); // index 2
+    expected_data.push_back(*std::next(data.begin(), 5)); // index 6
+    decltype(data) expected_data_2;
+    expected_data_2.push_back(*std::next(data.begin(), 8)); // index 9
+    expected_data_2.push_back(*std::next(data.begin(), 2)); // index 3
+    expected_data_2.push_back(*std::next(data.begin(), 3)); // index 4
+
+    reader.startReception(expected_data);
+
+    writer.send(data, 50);
+
+    // Wait for reception and check
+    reader.block_for_all();
+    ASSERT_EQ(0, total_count);
+
+    reader.destroy();
+
+    data = default_helloworld_data_generator(4);
+
+    writer.send(data, 50);
+
+    PubSubReader<HelloWorldPubSubType> reader_2(TEST_TOPIC_NAME, "index = 3 OR index = 4 OR index = 9", {}, true, false,
+            false);
+    reader_2
+            .reliability(RELIABLE_RELIABILITY_QOS)
+            .durability_kind(TRANSIENT_LOCAL_DURABILITY_QOS)
+            .sample_lost_status_functor([&total_count_2](const SampleLostStatus& status)
+            {
+                total_count_2 += status.total_count;
+            }).init();
+    ASSERT_TRUE(reader_2.isInitialized());
+
+
+    reader_2.wait_discovery();
+    writer.wait_discovery();
+
+    data = default_helloworld_data_generator(1);
+
+    writer.send(data, 50);
+
+    reader_2.startReception(expected_data_2);
+
+    // Wait for reception and check
+    reader_2.block_for_all();
+}
+
+/*
+ * Regression test for CVE-2026-22591
+ */
+TEST(DDSContentFilter, ShouldNotFailWithTooManySubExpressionsDiscovered)
+{
+    using namespace eprosima::fastdds::rtps;
+
+    const char* const topic_name = "DDSContentFilter_ShouldNotFailWithTooManySubExpressionsDiscovered";
+
+    // Since we want to send a custom crafted EDP message, we will specify the metatraffic port so we can send the
+    // crafted message to a known port.
+    PubSubWriter<HelloWorldPubSubType> writer(topic_name);
+    writer.setManualTopicName(topic_name);
+    writer.add_to_metatraffic_unicast_locator_list("127.0.0.1", 6999);
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    PubSubReader<HelloWorldPubSubType> reader(topic_name);
+    LocatorList initial_peers;
+    Locator loc;
+    IPLocator::createLocator(LOCATOR_KIND_UDPv4, "127.0.0.1", 6999, loc);
+    initial_peers.push_back(loc);
+    reader.setManualTopicName(topic_name);
+    reader.initial_peers(initial_peers);
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+
+    // Wait for discovery
+    writer.wait_discovery();
+
+    // Craft a filter expression with too many sub-expressions (nested parentheses)
+    constexpr size_t depth = 20000;
+    constexpr size_t expression_length = depth + depth + 9;
+    constexpr size_t expression_aligned_length = (expression_length + 1 /* null */ + 3) & ~3;
+    std::string filter_expression = std::string(depth, '(') + "index = 1" + std::string(depth, ')');
+    ASSERT_EQ(filter_expression.length(), expression_length);
+
+    // Structure for the malicious DATA(r) message payload
+    struct PayloadData
+    {
+        struct Encapsulation
+        {
+#if FASTDDS_IS_BIG_ENDIAN_TARGET
+            std::array<uint8_t, 2> encapsulation{ 0x00, 0x02 };  // PL_CDR_BE
+#else
+            std::array<uint8_t, 2> encapsulation{ 0x00, 0x03 };  // PL_CDR_LE
+#endif  // FASTDDS_IS_BIG_ENDIAN_TARGET
+            std::array<uint8_t, 2> encapsulation_opts{ 0x00, 0x00 };
+        }
+        encapsulation;
+
+        struct ReaderGUIDParameter
+        {
+            uint16_t parameter_id{ 0x5a };
+            uint16_t parameter_length{ 0x10 };
+            GUID_t value;
+        }
+        entity_guid;
+
+        struct TopicNameParameter
+        {
+            uint16_t parameter_id{ 0x05 };
+            uint16_t parameter_length{ 68 + 4 };
+            uint32_t string_length{ 66 }; // "DDSContentFilter_ShouldNotFailWithTooManySubExpressionsDiscovered" + null
+            std::array<char, 68> value { "DDSContentFilter_ShouldNotFailWithTooManySubExpressionsDiscovered\0" };
+        }
+        topic_name;
+
+        struct TypeNameParameter
+        {
+            uint16_t parameter_id{ 0x07 };
+            uint16_t parameter_length{ 12 + 4 };
+            uint32_t string_length{ 11 }; // "HelloWorld" + null
+            std::array<char, 12> value { "HelloWorld\0" };
+        }
+        type_name;
+
+        struct ContentFilterParameter
+        {
+            uint16_t parameter_id{ 0x35 };
+            uint16_t parameter_length{ 24 + 4 + 68 + 4 + 8 + 4 + expression_aligned_length + 4 + 4 };
+            struct ContentFilteredTopicName
+            {
+                uint32_t string_length{ 23 }; // "MaliciousFilteredTopic" + null
+                std::array<char, 24> value {"MaliciousFilteredTopic\0"};
+            }
+            content_filtered_topic_name;
+            struct RelatedTopicName
+            {
+                uint32_t string_length{ 66 }; // "DDSContentFilter_ShouldNotFailWithTooManySubExpressionsDiscovered" + null
+                std::array<char, 68> value{ "DDSContentFilter_ShouldNotFailWithTooManySubExpressionsDiscovered\0" };
+            }
+            related_topic_name;
+            struct FilterClassName
+            {
+                uint32_t string_length{ 7 }; // "DDSSQL" + null
+                std::array<char, 8> value{ "DDSSQL\0" };
+            }
+            filter_class_name;
+            struct FilterExpression
+            {
+                // Length will be set later
+                uint32_t string_length{ expression_length + 1 };
+                std::array<char, expression_aligned_length> value; // Padding to 4 bytes
+            }
+            filter_expression;
+            // Sequence of expression parameters (empty)
+            uint32_t expression_parameter_count{ 0 };
+        }
+        content_filter;
+
+        struct SentinelParameter
+        {
+            uint16_t parameter_id{ 0x0001 };
+            uint16_t parameter_length{ 0x0000 };
+        }
+        sentinel;
+    };
+
+    static_assert(
+        sizeof(PayloadData) ==
+        sizeof(PayloadData::Encapsulation) +
+        sizeof(PayloadData::ReaderGUIDParameter) +
+        sizeof(PayloadData::TopicNameParameter) +
+        sizeof(PayloadData::TypeNameParameter) +
+        sizeof(PayloadData::ContentFilterParameter) +
+        sizeof(PayloadData::SentinelParameter),
+        "Unexpected size for PayloadData");
+
+    struct MaliciousDiscoveryPacket
+    {
+        struct RTPSHeader
+        {
+            std::array<char, 4> rtps_id{ {'R', 'T', 'P', 'S'} };
+            std::array<uint8_t, 2> protocol_version{ {2, 3} };
+            std::array<uint8_t, 2> vendor_id{ {0x01, 0x0F} };
+            GuidPrefix_t sender_prefix{};
+        }
+        header;
+
+        static_assert(sizeof(RTPSHeader) == RTPSMESSAGE_HEADER_SIZE, "Unexpected size for RTPS header");
+
+        struct DataSubMsg
+        {
+            struct Header
+            {
+                uint8_t submessage_id = 0x15;
+#if FASTDDS_IS_BIG_ENDIAN_TARGET
+                uint8_t flags = 0x04; // Serialized data
+#else
+                uint8_t flags = 0x05; // Serialized data, endianness
+#endif  // FASTDDS_IS_BIG_ENDIAN_TARGET
+                uint16_t octets_to_next_header = 0;  // Last submessage, fills the rest of the packet
+                uint16_t extra_flags = 0;
+                uint16_t octets_to_inline_qos = 0x10;
+                EntityId_t reader_id = ENTITYID_SEDP_BUILTIN_SUBSCRIPTIONS_READER;
+                EntityId_t writer_id = ENTITYID_SEDP_BUILTIN_SUBSCRIPTIONS_WRITER;
+                SequenceNumber_t sn{ 2 };
+            };
+
+            static_assert(sizeof(Header) == RTPSMESSAGE_DATA_MIN_LENGTH, "Unexpected size for DATA header");
+
+            Header header;
+            PayloadData payload;
+        }
+        data;
+
+        static_assert(
+            sizeof(DataSubMsg) ==
+            sizeof(DataSubMsg::Header) + sizeof(PayloadData),
+            "Unexpected size for DataSubMsg");
+    };
+
+    static_assert(
+        sizeof(MaliciousDiscoveryPacket) ==
+        sizeof(MaliciousDiscoveryPacket::RTPSHeader) + sizeof(MaliciousDiscoveryPacket::DataSubMsg),
+        "Unexpected size for MaliciousDiscoveryPacket");
+
+    UDPMessageSender fake_msg_sender;
+
+    // Fill and send the malicious packet
+    {
+        GUID_t reader_guid = reader.datareader_guid();
+
+        MaliciousDiscoveryPacket malicious_packet;
+        malicious_packet.header.sender_prefix = reader_guid.guidPrefix;
+        malicious_packet.data.payload.entity_guid.value = reader_guid;
+        std::memcpy(
+            malicious_packet.data.payload.content_filter.filter_expression.value.data(),
+            filter_expression.data(),
+            filter_expression.length());
+
+        CDRMessage_t msg(0);
+        uint32_t msg_len = static_cast<uint32_t>(sizeof(malicious_packet));
+        msg.init(reinterpret_cast<octet*>(&malicious_packet), msg_len);
+        msg.length = msg_len;
+        msg.pos = msg_len;
+        fake_msg_sender.send(msg, loc);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+}
+
 #ifdef INSTANTIATE_TEST_SUITE_P
 #define GTEST_INSTANTIATE_TEST_MACRO(x, y, z, w) INSTANTIATE_TEST_SUITE_P(x, y, z, w)
 #else
@@ -740,3 +1282,4 @@ GTEST_INSTANTIATE_TEST_MACRO(DDSContentFilter,
 } // namespace dds
 } // namespace fastdds
 } // namespace eprosima
+

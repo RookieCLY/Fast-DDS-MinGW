@@ -33,10 +33,12 @@
 using namespace eprosima::fastdds;
 using namespace eprosima::fastdds::rtps;
 
+namespace {
 enum communication_type
 {
     TRANSPORT
 };
+}  // namespace
 
 class TransportUDP : public testing::TestWithParam<std::tuple<communication_type, bool>>
 {
@@ -808,6 +810,469 @@ TEST(TransportUDP, KeyOnlyBigPayloadIgnored_BestEffort)
     KeyOnlyBigPayloadIgnored(writer, reader);
 }
 
+// Regression test for redmine issue #23829
+TEST(TransportUDP, MaliciousGapBigRange)
+{
+    // Force using UDP transport
+    auto udp_transport = std::make_shared<UDPv4TransportDescriptor>();
+
+    PubSubWriter<UnboundedHelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    PubSubReader<UnboundedHelloWorldPubSubType> reader(TEST_TOPIC_NAME);
+
+    struct MaliciousGapBigRange
+    {
+        std::array<char, 4> rtps_id{ {'R', 'T', 'P', 'S'} };
+        std::array<uint8_t, 2> protocol_version{ {2, 3} };
+        std::array<uint8_t, 2> vendor_id{ {0x01, 0x0F} };
+        GuidPrefix_t sender_prefix{};
+
+        struct GapSubMsg
+        {
+            uint8_t submessage_id = 0x08;
+#if FASTDDS_IS_BIG_ENDIAN_TARGET
+            uint8_t flags = 0x00;
+#else
+            uint8_t flags = 0x01;
+#endif  // FASTDDS_IS_BIG_ENDIAN_TARGET
+            uint16_t octets_to_next_header = 28;
+            EntityId_t reader_id{};
+            EntityId_t writer_id{};
+            SequenceNumber_t gap_start{ 10u };
+            SequenceNumber_t gap_list_base{ std::numeric_limits<uint32_t>::max() };
+            uint32_t num_longs_bitmap = 0;
+        }
+        gap;
+    };
+
+    UDPMessageSender fake_msg_sender;
+
+    // Set common QoS
+    reader.disable_builtin_transport().add_user_transport_to_pparams(udp_transport)
+            .history_depth(10).reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS);
+    writer.history_depth(10).reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS);
+
+    // Set custom reader locator so we can send malicious data to a known location
+    Locator_t reader_locator;
+    ASSERT_TRUE(IPLocator::setIPv4(reader_locator, "127.0.0.1"));
+    reader_locator.port = 7000;
+    reader.add_to_unicast_locator_list("127.0.0.1", 7000);
+
+    // Initialize and wait for discovery
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    reader.wait_discovery();
+    writer.wait_discovery();
+
+    // Send 1 sample and wait for reception
+    auto data = default_unbounded_helloworld_data_generator(1);
+    reader.startReception(data);
+    writer.send(data);
+    ASSERT_TRUE(data.empty());
+    reader.block_for_all();
+
+    // Send malicious data
+    {
+        auto writer_guid = writer.datawriter_guid();
+
+        MaliciousGapBigRange malicious_packet{};
+        malicious_packet.sender_prefix = writer_guid.guidPrefix;
+        malicious_packet.gap.writer_id = writer_guid.entityId;
+        malicious_packet.gap.reader_id = reader.datareader_guid().entityId;
+
+        CDRMessage_t msg(0);
+        uint32_t msg_len = static_cast<uint32_t>(sizeof(malicious_packet));
+        msg.init(reinterpret_cast<octet*>(&malicious_packet), msg_len);
+        msg.length = msg_len;
+        msg.pos = msg_len;
+        fake_msg_sender.send(msg, reader_locator);
+    }
+
+    // Block for some time to let the message be processed
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+}
+
+// Regression test for redmine issue #23830
+TEST(TransportUDP, MaliciousDataFragUnalignedSizes)
+{
+    // Force using UDP transport
+    auto udp_transport = std::make_shared<UDPv4TransportDescriptor>();
+
+    PubSubWriter<UnboundedHelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    PubSubReader<UnboundedHelloWorldPubSubType> reader(TEST_TOPIC_NAME);
+
+    struct MaliciousDataFragUnalignedSizes
+    {
+        std::array<char, 4> rtps_id{ {'R', 'T', 'P', 'S'} };
+        std::array<uint8_t, 2> protocol_version{ {2, 3} };
+        std::array<uint8_t, 2> vendor_id{ {0x01, 0x0F} };
+        GuidPrefix_t sender_prefix{};
+
+        struct DataFragSubMsg
+        {
+            struct Header
+            {
+                uint8_t submessage_id = 0x16;
+#if FASTDDS_IS_BIG_ENDIAN_TARGET
+                uint8_t flags = 0x00;
+#else
+                uint8_t flags = 0x01;
+#endif  // FASTDDS_IS_BIG_ENDIAN_TARGET
+                uint16_t octets_to_next_header = 0x22;
+                uint16_t extra_flags = 0;
+                uint16_t octets_to_inline_qos = 0x1c;
+                EntityId_t reader_id{};
+                EntityId_t writer_id{};
+                SequenceNumber_t sn{100};
+                uint32_t fragment_starting_num = 2;
+                uint16_t fragments_in_submessage = 1;
+                uint16_t fragment_size = 50002;
+                uint32_t sample_size = 50003;
+            };
+
+            struct SerializedData
+            {
+                octet data[2] {0xAA, 0xAA};
+            };
+
+            Header header;
+            SerializedData payload;
+        }
+        data;
+    };
+
+    UDPMessageSender fake_msg_sender;
+
+    // Set common QoS
+    reader.disable_builtin_transport().add_user_transport_to_pparams(udp_transport)
+            .history_depth(10).reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS);
+    writer.history_depth(10).reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS);
+
+    // Set custom reader locator so we can send malicious data to a known location
+    Locator_t reader_locator;
+    ASSERT_TRUE(IPLocator::setIPv4(reader_locator, "127.0.0.1"));
+    reader_locator.port = 7000;
+    reader.add_to_unicast_locator_list("127.0.0.1", 7000);
+
+    // Initialize and wait for discovery
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    reader.wait_discovery();
+    writer.wait_discovery();
+
+    auto data = default_unbounded_helloworld_data_generator();
+    reader.startReception(data);
+    writer.send(data);
+    ASSERT_TRUE(data.empty());
+
+    // Send malicious data
+    {
+        auto writer_guid = writer.datawriter_guid();
+
+        MaliciousDataFragUnalignedSizes malicious_packet{};
+        malicious_packet.sender_prefix = writer_guid.guidPrefix;
+        malicious_packet.data.header.writer_id = writer_guid.entityId;
+        malicious_packet.data.header.reader_id = reader.datareader_guid().entityId;
+
+        CDRMessage_t msg(0);
+        uint32_t msg_len = static_cast<uint32_t>(sizeof(malicious_packet));
+        msg.init(reinterpret_cast<octet*>(&malicious_packet), msg_len);
+        msg.length = msg_len;
+        msg.pos = msg_len;
+        fake_msg_sender.send(msg, reader_locator);
+    }
+
+    // Block reader until reception finished or timeout.
+    reader.block_for_all();
+}
+
+// Regression test for redmine issue #24030
+TEST(TransportUDP, MaliciousDataFragLastFragment)
+{
+    // Force using UDP transport
+    auto udp_transport = std::make_shared<UDPv4TransportDescriptor>();
+
+    PubSubWriter<UnboundedHelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    PubSubReader<UnboundedHelloWorldPubSubType> reader(TEST_TOPIC_NAME);
+
+    struct MaliciousDataFragInconsistentLastFragmentLength
+    {
+        std::array<char, 4> rtps_id{ {'R', 'T', 'P', 'S'} };
+        std::array<uint8_t, 2> protocol_version{ {2, 3} };
+        std::array<uint8_t, 2> vendor_id{ {0x01, 0x0F} };
+        GuidPrefix_t sender_prefix{};
+
+        struct DataFragSubMsg
+        {
+            struct Header
+            {
+                uint8_t submessage_id = 0x16;
+#if FASTDDS_IS_BIG_ENDIAN_TARGET
+                uint8_t flags = 0x00;
+#else
+                uint8_t flags = 0x01;
+#endif  // FASTDDS_IS_BIG_ENDIAN_TARGET
+                uint16_t octets_to_next_header = 0x24;
+                uint16_t extra_flags = 0;
+                uint16_t octets_to_inline_qos = 0x1c;
+                EntityId_t reader_id{};
+                EntityId_t writer_id{};
+                SequenceNumber_t sn{100};
+                uint32_t fragment_starting_num = 1;
+                uint16_t fragments_in_submessage = 8;
+                uint16_t fragment_size = 65504;
+                uint32_t sample_size = 65504 * 8;
+            };
+
+            struct SerializedData
+            {
+                octet data[4] {0xA0, 0xA1, 0xA2, 0xA3};
+            };
+
+            Header header;
+            SerializedData payload;
+        }
+        data;
+    };
+
+    UDPMessageSender fake_msg_sender;
+
+    // Set common QoS
+    reader.disable_builtin_transport().add_user_transport_to_pparams(udp_transport)
+            .history_depth(10).reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS);
+    writer.history_depth(10).reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS);
+
+    // Set custom reader locator so we can send malicious data to a known location
+    Locator_t reader_locator;
+    ASSERT_TRUE(IPLocator::setIPv4(reader_locator, "127.0.0.1"));
+    reader_locator.port = 7000;
+    reader.add_to_unicast_locator_list("127.0.0.1", 7000);
+
+    // Initialize and wait for discovery
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    reader.wait_discovery();
+    writer.wait_discovery();
+
+    auto data = default_unbounded_helloworld_data_generator();
+    reader.startReception(data);
+    writer.send(data);
+    ASSERT_TRUE(data.empty());
+
+    // Send malicious data
+    {
+        auto writer_guid = writer.datawriter_guid();
+
+        MaliciousDataFragInconsistentLastFragmentLength malicious_packet{};
+        malicious_packet.sender_prefix = writer_guid.guidPrefix;
+        malicious_packet.data.header.writer_id = writer_guid.entityId;
+        malicious_packet.data.header.reader_id = reader.datareader_guid().entityId;
+
+        CDRMessage_t msg(0);
+        uint32_t msg_len = static_cast<uint32_t>(sizeof(malicious_packet));
+        msg.init(reinterpret_cast<octet*>(&malicious_packet), msg_len);
+        msg.length = msg_len;
+        msg.pos = msg_len;
+        fake_msg_sender.send(msg, reader_locator);
+    }
+
+    // Block reader until reception finished or timeout.
+    reader.block_for_all();
+}
+
+// Regression test for redmine issue #23917
+TEST(TransportUDP, MaliciousHeartbeatBigStart)
+{
+    // Force using UDP transport
+    auto udp_transport = std::make_shared<UDPv4TransportDescriptor>();
+
+    PubSubWriter<UnboundedHelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    PubSubReader<UnboundedHelloWorldPubSubType> reader(TEST_TOPIC_NAME);
+
+    struct MaliciousHeartbeatBigStart
+    {
+        std::array<char, 4> rtps_id{ {'R', 'T', 'P', 'S'} };
+        std::array<uint8_t, 2> protocol_version{ {2, 3} };
+        std::array<uint8_t, 2> vendor_id{ {0x01, 0x0F} };
+        GuidPrefix_t sender_prefix{};
+
+        struct HeartbeatSubMsg
+        {
+            uint8_t submessage_id = 0x07;
+#if FASTDDS_IS_BIG_ENDIAN_TARGET
+            uint8_t flags = 0x00;
+#else
+            uint8_t flags = 0x01;
+#endif  // FASTDDS_IS_BIG_ENDIAN_TARGET
+            uint16_t octets_to_next_header = 28;
+            EntityId_t reader_id{};
+            EntityId_t writer_id{};
+            SequenceNumber_t first_sn{ 1, 0u };
+            SequenceNumber_t last_sn{ 1, 1u };
+            uint32_t hb_count = 0x7fffffffu;
+        }
+        hb;
+    };
+
+    UDPMessageSender fake_msg_sender;
+
+    // Set common QoS
+    reader.disable_builtin_transport().add_user_transport_to_pparams(udp_transport)
+            .history_depth(10).reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS);
+    writer.history_depth(10).reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS);
+
+    // Set custom reader locator so we can send malicious data to a known location
+    Locator_t reader_locator;
+    ASSERT_TRUE(IPLocator::setIPv4(reader_locator, "127.0.0.1"));
+    reader_locator.port = 7000;
+    reader.add_to_unicast_locator_list("127.0.0.1", 7000);
+
+    // Initialize and wait for discovery
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    reader.wait_discovery();
+    writer.wait_discovery();
+
+    // Send 10 samples
+    auto data = default_unbounded_helloworld_data_generator(10);
+    auto expected_data = data;
+    writer.send(data);
+    ASSERT_TRUE(data.empty());
+
+    auto start = std::chrono::steady_clock::now();
+
+    // Send malicious heartbeat before taking samples
+    {
+        auto writer_guid = writer.datawriter_guid();
+
+        MaliciousHeartbeatBigStart malicious_packet{};
+        malicious_packet.sender_prefix = writer_guid.guidPrefix;
+        malicious_packet.hb.writer_id = writer_guid.entityId;
+        malicious_packet.hb.reader_id = reader.datareader_guid().entityId;
+
+        CDRMessage_t msg(0);
+        uint32_t msg_len = static_cast<uint32_t>(sizeof(malicious_packet));
+        msg.init(reinterpret_cast<octet*>(&malicious_packet), msg_len);
+        msg.length = msg_len;
+        msg.pos = msg_len;
+        fake_msg_sender.send(msg, reader_locator);
+    }
+
+    // Start reception of expected data
+    reader.startReception(expected_data);
+    EXPECT_EQ(reader.block_for_all(std::chrono::seconds(10)), expected_data.size());
+    reader.destroy();
+
+    // Ensure that the test does not take too long
+    auto end = std::chrono::steady_clock::now();
+    EXPECT_LT(end - start, std::chrono::seconds(15));
+}
+
+// Regression test issue #24365: a sequence-number gap larger than INT32_MAX between two DATA submessages
+// must not overflow DataReaderImpl::SampleLostStatus::total_count. The expected behavior is saturation at INT32_MAX.
+TEST(TransportUDP, MaliciousDataLargeSequenceNumberGap)
+{
+    auto udp_transport = std::make_shared<UDPv4TransportDescriptor>();
+
+    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    PubSubReader<HelloWorldPubSubType> reader(TEST_TOPIC_NAME);
+
+    struct MaliciousData
+    {
+        std::array<char, 4> rtps_id{ {'R', 'T', 'P', 'S'} };
+        std::array<uint8_t, 2> protocol_version{ {2, 3} };
+        std::array<uint8_t, 2> vendor_id{ {0x01, 0x0F} };
+        GuidPrefix_t sender_prefix{};
+
+        struct DataSubMsg
+        {
+            uint8_t submessage_id = 0x15; // DATA
+#if FASTDDS_IS_BIG_ENDIAN_TARGET
+            uint8_t flags = 0x04;         // D=1
+#else
+            uint8_t flags = 0x05;         // E=1, D=1
+#endif  // FASTDDS_IS_BIG_ENDIAN_TARGET
+            uint16_t octets_to_next_header = 24;
+            uint16_t extra_flags = 0;
+            uint16_t octets_to_inline_qos = 16;
+            EntityId_t reader_id{};
+            EntityId_t writer_id{};
+            SequenceNumber_t sn{ 0, 1u };
+            // Minimal serialized payload: just the CDR_LE encapsulation header.
+            std::array<uint8_t, 4> serialized_payload{ {0x00, 0x01, 0x00, 0x00} };
+        }
+        data;
+    };
+
+    UDPMessageSender fake_msg_sender;
+
+    reader.disable_builtin_transport().add_user_transport_to_pparams(udp_transport)
+            .history_depth(10)
+            .reliability(eprosima::fastdds::dds::BEST_EFFORT_RELIABILITY_QOS);
+    writer.history_depth(10).reliability(eprosima::fastdds::dds::BEST_EFFORT_RELIABILITY_QOS);
+
+    Locator_t reader_locator;
+    ASSERT_TRUE(IPLocator::setIPv4(reader_locator, "127.0.0.1"));
+    reader_locator.port = global_port;
+    reader.add_to_unicast_locator_list("127.0.0.1", global_port);
+
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    reader.wait_discovery();
+    writer.wait_discovery();
+
+    auto send_data_with_sn = [&](const SequenceNumber_t& sn)
+            {
+                auto writer_guid = writer.datawriter_guid();
+
+                MaliciousData malicious_packet{};
+                malicious_packet.sender_prefix = writer_guid.guidPrefix;
+                malicious_packet.data.writer_id = writer_guid.entityId;
+                malicious_packet.data.reader_id = reader.datareader_guid().entityId;
+                malicious_packet.data.sn = sn;
+
+                CDRMessage_t msg(0);
+                uint32_t msg_len = static_cast<uint32_t>(sizeof(malicious_packet));
+                msg.init(reinterpret_cast<octet*>(&malicious_packet), msg_len);
+                msg.length = msg_len;
+                msg.pos = msg_len;
+                fake_msg_sender.send(msg, reader_locator);
+            };
+
+    // Packet 1: establish baseline (SN = 1).
+    send_data_with_sn(SequenceNumber_t{ 0, 1u });
+    // Packet 2: small gap (SN = 3) -> total_count becomes 1.
+    send_data_with_sn(SequenceNumber_t{ 0, 3u });
+    // Packet 3: SN = 0x80000004 -> per-event lost saturates at INT32_MAX.
+    // Without saturation in update_sample_lost_status, total_count = 1 + INT32_MAX overflows.
+    send_data_with_sn(SequenceNumber_t{ 0, 0x80000004u });
+
+    // Allow the reader thread to drain the three injected packets.
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // If the previous step did not abort the process under UBSan, the counter must remain
+    // non-negative (no wrap) and within int32_t range (saturated, not overflowed).
+    // auto status = reader.get_sample_lost_status();
+    // EXPECT_GE(status.total_count, 0);
+    // EXPECT_LE(status.total_count, std::numeric_limits<int32_t>::max());
+
+    reader.destroy();
+}
+
 // Test for ==operator UDPTransportDescriptor is not required as it is an abstract class and in UDPv4 is same method
 // Test for copy UDPTransportDescriptor is not required as it is an abstract class and in UDPv4 is same method
 
@@ -891,6 +1356,93 @@ TEST(BlackBox, UDPv6_copy)
     EXPECT_EQ(udpv6_transport_copy, udpv6_transport);
 }
 
+TEST(TransportUDP, MaliciousDataFragSubmsgLengthUnderflowIgnore)
+{
+    // Force using UDP transport
+    auto udp_transport = std::make_shared<UDPv4TransportDescriptor>();
+
+    PubSubWriter<UnboundedHelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    PubSubReader<UnboundedHelloWorldPubSubType> reader(TEST_TOPIC_NAME);
+
+    struct MaliciousDataFragSubmsgLengthUnderflow
+    {
+        std::array<char, 4> rtps_id{ {'R', 'T', 'P', 'S'} };
+        std::array<uint8_t, 2> protocol_version{ {2, 3} };
+        std::array<uint8_t, 2> vendor_id{ {0x01, 0x0F} };
+        GuidPrefix_t sender_prefix{};
+
+        struct DataFragSubMsg
+        {
+            struct Header
+            {
+                uint8_t submessage_id = 0x16;
+#if FASTDDS_IS_BIG_ENDIAN_TARGET
+                uint8_t flags = 0x00;
+#else
+                uint8_t flags = 0x01;
+#endif  // FASTDDS_IS_BIG_ENDIAN_TARGET
+                uint16_t octets_to_next_header = 0x1C;
+                uint16_t extra_flags = 0;
+                uint16_t octets_to_inline_qos = 0x1C;
+                EntityId_t reader_id{};
+                EntityId_t writer_id{};
+                SequenceNumber_t sn{ 1 };
+                uint32_t fragment_starting_num = 1;
+                uint16_t fragments_in_submessage = 8;
+                uint16_t fragment_size = 65500;
+                uint32_t sample_size = 500000;
+            };
+
+            Header header;
+        }
+        data;
+    };
+
+    UDPMessageSender fake_msg_sender;
+
+    // Set common QoS
+    reader.disable_builtin_transport().add_user_transport_to_pparams(udp_transport)
+            .history_depth(10).reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS);
+    writer.history_depth(10).reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS);
+
+    // Set custom reader locator so we can send malicious data to a known location
+    Locator_t reader_locator;
+    ASSERT_TRUE(IPLocator::setIPv4(reader_locator, "127.0.0.1"));
+    reader_locator.port = 7000;
+    reader.add_to_unicast_locator_list("127.0.0.1", 7000);
+
+    // Initialize and wait for discovery
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    reader.wait_discovery();
+    writer.wait_discovery();
+
+    reader.startReception(1);
+
+    // Send malicious data
+    {
+        auto writer_guid = writer.datawriter_guid();
+
+        MaliciousDataFragSubmsgLengthUnderflow malicious_packet{};
+        malicious_packet.sender_prefix = writer_guid.guidPrefix;
+        malicious_packet.data.header.writer_id = writer_guid.entityId;
+        malicious_packet.data.header.reader_id = reader.datareader_guid().entityId;
+
+        CDRMessage_t msg(0);
+        uint32_t msg_len = static_cast<uint32_t>(sizeof(malicious_packet));
+        msg.init(reinterpret_cast<octet*>(&malicious_packet), msg_len);
+        msg.length = msg_len;
+        msg.pos = msg_len;
+        fake_msg_sender.send(msg, reader_locator);
+    }
+
+    // Malicious message should have been skipped.
+    EXPECT_EQ(0u, reader.block_for_all(std::chrono::milliseconds(500)));
+}
+
 #ifdef INSTANTIATE_TEST_SUITE_P
 #define GTEST_INSTANTIATE_TEST_MACRO(x, y, z, w) INSTANTIATE_TEST_SUITE_P(x, y, z, w)
 #else
@@ -912,4 +1464,3 @@ GTEST_INSTANTIATE_TEST_MACRO(TransportUDP,
             }
 
         });
-

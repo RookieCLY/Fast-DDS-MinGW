@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+###################################  Prepare test files  ####################################################
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/regressions" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+
+
+##############################  BuiltinDataSerializationTests  ##############################################
 set(BUILTIN_DATA_SERIALIZATION_TESTS_SOURCE BuiltinDataSerializationTests.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/fastdds/core/policy/ParameterList.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/fastdds/core/Time_t.cpp
@@ -20,8 +25,10 @@ set(BUILTIN_DATA_SERIALIZATION_TESTS_SOURCE BuiltinDataSerializationTests.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/fastdds/xtypes/exception/Exception.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/fastdds/xtypes/type_representation/dds_xtypes_typeobjectPubSubTypes.cxx
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/attributes/ThreadSettings.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/ParticipantBuiltinTopicData.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/ParticipantProxyData.cpp
-    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/ProxyDataConverters.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/PublicationBuiltinTopicData.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/SubscriptionBuiltinTopicData.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/ReaderProxyData.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/WriterProxyData.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/common/GuidPrefix_t.cpp
@@ -77,21 +84,14 @@ target_include_directories(BuiltinDataSerializationTests PRIVATE
     $<$<BOOL:${ANDROID}>:${ANDROID_IFADDRS_INCLUDE_DIR}>
     )
 target_link_libraries(BuiltinDataSerializationTests
+    fastcdr
     fastdds::log
     foonathan_memory
     GTest::gmock
+    $<$<BOOL:${WIN32}>:iphlpapi$<SEMICOLON>Shlwapi>
+    $<$<BOOL:${WIN32}>:ws2_32>
+    $<$<BOOL:${QNX}>:socket>
+    $<$<BOOL:${LINK_SSL}>:OpenSSL::SSL$<SEMICOLON>OpenSSL::Crypto$<$<BOOL:${WIN32}>:$<SEMICOLON>crypt32.lib>>
     ${CMAKE_DL_LIBS})
-if(QNX)
-    target_link_libraries(BuiltinDataSerializationTests socket)
-endif()
-if(MSVC OR MSVC_IDE)
-    target_link_libraries(BuiltinDataSerializationTests ${PRIVACY} fastcdr iphlpapi Shlwapi ws2_32)
-else()
-    target_link_libraries(BuiltinDataSerializationTests ${PRIVACY} fastcdr)
-endif()
-
-if (APPLE)
-    target_link_libraries(BuiltinDataSerializationTests ${PRIVACY} "-framework CoreFoundation" "-framework IOKit")
-endif()
 
 gtest_discover_tests(BuiltinDataSerializationTests)

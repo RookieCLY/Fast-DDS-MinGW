@@ -32,7 +32,7 @@
 #include <rtps/attributes/ServerAttributes.hpp>
 #include <rtps/builtin/discovery/database/DiscoveryDataBase.hpp>
 #include <rtps/builtin/discovery/database/DiscoveryDataFilter.hpp>
-#include <rtps/builtin/discovery/participant/DS/DiscoveryServerPDPEndpointsSecure.hpp>
+#include <rtps/builtin/discovery/participant/DS/DiscoveryServerPDPEndpoints.hpp>
 #include <rtps/builtin/discovery/participant/timedevent/DServerEvent.hpp>
 #include <rtps/messages/RTPSMessageGroup.hpp>
 #include <rtps/resources/ResourceEvent.h>
@@ -138,6 +138,14 @@ public:
             bool dispose = false);
 
     /**
+     * Sends own DATA(p) to the participant specified in @p pdata.
+     * Used to send first DATA(p) to new clients after discover them.
+     * @param pdata Pointer to the RTPSParticipantProxyData object.
+     *  */
+    void send_own_pdp(
+            ParticipantProxyData* pdata);
+
+    /**
      * These methods wouldn't be needed under perfect server operation (no need of dynamic endpoint allocation)
      * but must be implemented to solve server shutdown situations.
      * @param pdata Pointer to the RTPSParticipantProxyData object.
@@ -149,16 +157,6 @@ public:
     void notifyAboveRemoteEndpoints(
             const fastdds::rtps::ParticipantProxyData& pdata,
             bool notify_secure_endpoints) override;
-
-#if HAVE_SECURITY
-    bool pairing_remote_writer_with_local_reader_after_security(
-            const fastdds::rtps::GUID_t& local_reader,
-            const fastdds::rtps::WriterProxyData& remote_writer_data) override;
-
-    bool pairing_remote_reader_with_local_writer_after_security(
-            const fastdds::rtps::GUID_t& local_reader,
-            const fastdds::rtps::ReaderProxyData& remote_reader_data) override;
-#endif // HAVE_SECURITY
 
     //! Get filename for writer persistence database file
     std::string get_writer_persistence_file_name() const;
@@ -315,18 +313,6 @@ private:
 
     using PDP::announceParticipantState;
 
-#if HAVE_SECURITY
-    /**
-     * Returns whether discovery should be secured
-     */
-    bool should_protect_discovery();
-
-    /**
-     * Performs creation of secured DS PDP endpoints
-     */
-    bool create_secure_ds_pdp_endpoints();
-#endif  // HAVE_SECURITY
-
     /**
      * Performs creation of standard DS PDP endpoints
      */
@@ -343,16 +329,6 @@ private:
     bool create_ds_pdp_reliable_endpoints(
             DiscoveryServerPDPEndpoints& endpoints,
             bool secure);
-
-    /**
-     * Performs creation of DS best-effort PDP reader.
-     *
-     * @param [in,out]  endpoints  Container where the created resources should be kept.
-     *
-     * @return whether the reader was successfully created.
-     */
-    bool create_ds_pdp_best_effort_reader(
-            DiscoveryServerPDPEndpointsSecure& endpoints);
 
     /**
      * Provides the functionality of notifyAboveRemoteEndpoints without being an override of that method.

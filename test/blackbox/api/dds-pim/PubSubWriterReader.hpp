@@ -275,7 +275,8 @@ class PubSubWriterReader
                 do
                 {
                     wreader_.receive_one(datareader, ret);
-                } while (ret);
+                }
+                while (ret);
             }
         }
 
@@ -569,7 +570,7 @@ public:
 
     std::list<type> data_not_received()
     {
-        std::unique_lock<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(mutex_);
         return total_msgs_;
     }
 
@@ -684,7 +685,7 @@ public:
     }
 
 #if HAVE_SECURITY
-    void waitAuthorized(
+    void wait_authorized(
             unsigned int how_many = 1)
     {
         std::unique_lock<std::mutex> lock(mutexAuthentication_);
@@ -700,7 +701,7 @@ public:
         std::cout << "WReader authorization finished..." << std::endl;
     }
 
-    void waitUnauthorized(
+    void wait_unauthorized(
             unsigned int how_many = 1)
     {
         std::unique_lock<std::mutex> lock(mutexAuthentication_);
@@ -919,7 +920,7 @@ private:
         {
             returnedValue = true;
 
-            std::unique_lock<std::mutex> lock(mutex_);
+            std::lock_guard<std::mutex> lock(mutex_);
 
             // Check order of changes.
             if (datareader == datareader_)

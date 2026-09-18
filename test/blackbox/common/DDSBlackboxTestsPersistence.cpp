@@ -23,18 +23,18 @@
 #include "BlackboxTests.hpp"
 #include "PubSubReader.hpp"
 #include "PubSubWriter.hpp"
-#include "ReqRepAsReliableHelloWorldReplier.hpp"
-#include "ReqRepAsReliableHelloWorldRequester.hpp"
 
 using namespace eprosima::fastdds;
 using namespace eprosima::fastdds::rtps;
 
+namespace {
 enum communication_type
 {
     TRANSPORT,
     INTRAPROCESS,
     DATASHARING
 };
+}  // namespace
 
 class DDSPersistenceTests : public testing::TestWithParam<communication_type>
 {
@@ -56,7 +56,8 @@ protected:
         {
             case INTRAPROCESS:
                 library_settings.intraprocess_delivery = eprosima::fastdds::IntraprocessDeliveryType::INTRAPROCESS_FULL;
-                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(library_settings);
+                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(
+                    library_settings);
                 break;
             case DATASHARING:
                 enable_datasharing = true;
@@ -73,9 +74,9 @@ protected:
         std::ostringstream ss;
         std::string test_case_name(info->test_case_name());
         std::string test_name(info->name());
-        ss <<
-            test_case_name.replace(test_case_name.find_first_of('/'), 1, "_") << "_" <<
-            test_name.replace(test_name.find_first_of('/'), 1, "_")  << "_" << GET_PID() << ".db";
+        ss
+            << test_case_name.replace(test_case_name.find_first_of('/'), 1, "_") << "_"
+            << test_name.replace(test_name.find_first_of('/'), 1, "_")  << "_" << GET_PID() << ".db";
         db_file_name_ = ss.str();
 
     }
@@ -87,7 +88,8 @@ protected:
         {
             case INTRAPROCESS:
                 library_settings.intraprocess_delivery = eprosima::fastdds::IntraprocessDeliveryType::INTRAPROCESS_OFF;
-                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(library_settings);
+                eprosima::fastdds::dds::DomainParticipantFactory::get_instance()->set_library_settings(
+                    library_settings);
                 break;
             case DATASHARING:
                 enable_datasharing = false;
@@ -370,16 +372,6 @@ TEST_P(DDSPersistenceTests, PubSubAsReliablePubTransientWithStaticDiscovery)
         R_UNICAST_PORT_RANDOM_NUMBER_STR = "7421";
     }
     int32_t R_UNICAST_PORT_RANDOM_NUMBER = stoi(R_UNICAST_PORT_RANDOM_NUMBER_STR);
-    value = std::getenv("MULTICAST_PORT_RANDOM_NUMBER");
-    if (value != nullptr)
-    {
-        MULTICAST_PORT_RANDOM_NUMBER_STR = value;
-    }
-    else
-    {
-        MULTICAST_PORT_RANDOM_NUMBER_STR = "7400";
-    }
-    int32_t MULTICAST_PORT_RANDOM_NUMBER = stoi(MULTICAST_PORT_RANDOM_NUMBER_STR);
 
     PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
 
@@ -391,18 +383,12 @@ TEST_P(DDSPersistenceTests, PubSubAsReliablePubTransientWithStaticDiscovery)
     IPLocator::setIPv4(LocatorBuffer, 127, 0, 0, 1);
     WriterUnicastLocators.push_back(LocatorBuffer);
 
-    LocatorList_t WriterMulticastLocators;
-
-    LocatorBuffer.port = static_cast<uint16_t>(MULTICAST_PORT_RANDOM_NUMBER);
-    WriterMulticastLocators.push_back(LocatorBuffer);
-
     writer
             .history_kind(eprosima::fastdds::dds::KEEP_ALL_HISTORY_QOS)
             .reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS)
             .make_transient(db_file_name(), "78.73.69.74.65.72.5f.70.65.72.73.5f|67.75.69.1")
             .static_discovery("file://PubSubWriterPersistence_static_disc.xml")
             .unicastLocatorList(WriterUnicastLocators)
-            .multicastLocatorList(WriterMulticastLocators)
             .setPublisherIDs(1, 2)
             .setManualTopicName(std::string("BlackBox_StaticDiscovery_") + TOPIC_RANDOM_NUMBER)
             .user_data({'V', 'G', 'W', 0x78, 0x73, 0x69, 0x74, 0x65, 0x72, 0x5f, 0x70, 0x65, 0x72, 0x73, 0x5f, 0x67,
@@ -418,11 +404,6 @@ TEST_P(DDSPersistenceTests, PubSubAsReliablePubTransientWithStaticDiscovery)
     LocatorBuffer.port = static_cast<uint16_t>(R_UNICAST_PORT_RANDOM_NUMBER);
     ReaderUnicastLocators.push_back(LocatorBuffer);
 
-    LocatorList_t ReaderMulticastLocators;
-
-    LocatorBuffer.port = static_cast<uint16_t>(MULTICAST_PORT_RANDOM_NUMBER);
-    ReaderMulticastLocators.push_back(LocatorBuffer);
-
     reader
             .history_kind(eprosima::fastdds::dds::KEEP_LAST_HISTORY_QOS)
             .history_depth(10)
@@ -430,7 +411,6 @@ TEST_P(DDSPersistenceTests, PubSubAsReliablePubTransientWithStaticDiscovery)
             .make_transient(db_file_name(), "78.73.69.74.65.72.5f.70.65.72.73.5f|67.75.69.3")
             .static_discovery("file://PubSubReaderPersistence_static_disc.xml")
             .unicastLocatorList(ReaderUnicastLocators)
-            .multicastLocatorList(ReaderMulticastLocators)
             .setSubscriberIDs(3, 4)
             .setManualTopicName(std::string("BlackBox_StaticDiscovery_") + TOPIC_RANDOM_NUMBER)
             .init();
@@ -451,7 +431,7 @@ TEST_P(DDSPersistenceTests, PubSubAsReliablePubTransientWithStaticDiscovery)
 
     reader.startReception(unreceived_data);
 
-    // Wait expecting not receiving data.
+    // Wait expecting receiving data.
     ASSERT_EQ(10u, reader.block_for_all(std::chrono::seconds(1)));
 
     // Destroy the DataWriter

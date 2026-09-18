@@ -28,6 +28,7 @@
 #include <fastdds/rtps/attributes/RTPSParticipantAllocationAttributes.hpp>
 #include <fastdds/rtps/attributes/WriterAttributes.hpp>
 #include <fastdds/rtps/builtin/data/BuiltinEndpoints.hpp>
+#include <fastdds/rtps/builtin/data/ParticipantBuiltinTopicData.hpp>
 #include <fastdds/rtps/common/ProductVersion_t.hpp>
 #include <fastdds/rtps/common/RemoteLocators.hpp>
 #include <fastdds/rtps/common/Token.hpp>
@@ -61,7 +62,7 @@ class ProxyHashTable;
  * ParticipantProxyData class is used to store and convert the information Participants send to each other during the PDP phase.
  *@ingroup BUILTIN_MODULE
  */
-class ParticipantProxyData
+class ParticipantProxyData : public ParticipantBuiltinTopicData
 {
 public:
 
@@ -74,35 +75,19 @@ public:
     virtual ~ParticipantProxyData();
 
     //!Protocol version
-    ProtocolVersion_t m_protocolVersion;
-    //!GUID
-    GUID_t m_guid;
+    ProtocolVersion_t m_protocol_version;
     //!Machine ID
     fastcdr::string_255 machine_id;
-    //!Vendor ID
-    fastdds::rtps::VendorId_t m_VendorId;
-    //! Product version
-    fastdds::rtps::ProductVersion_t product_version;
-    //!Domain ID
-    fastdds::dds::DomainId_t m_domain_id;
     //!Expects Inline QOS.
-    bool m_expectsInlineQos;
+    bool m_expects_inline_qos;
     //!Available builtin endpoints
-    BuiltinEndpointSet_t m_availableBuiltinEndpoints;
+    BuiltinEndpointSet_t m_available_builtin_endpoints;
     //!Network configuration
-    NetworkConfigSet_t m_networkConfiguration;
-    //!Metatraffic locators
-    RemoteLocatorList metatraffic_locators;
-    //!Default locators
-    RemoteLocatorList default_locators;
+    NetworkConfigSet_t m_network_configuration;
     //!Manual liveliness count
-    Count_t m_manualLivelinessCount;
-    //!Participant name
-    fastcdr::string_255 m_participantName;
+    Count_t m_manual_liveliness_count;
     //!
     InstanceHandle_t m_key;
-    //!
-    dds::Duration_t m_leaseDuration;
 #if HAVE_SECURITY
     //!
     IdentityToken identity_token_;
@@ -114,11 +99,7 @@ public:
     security::PluginParticipantSecurityAttributesMask plugin_security_attributes_;
 #endif // if HAVE_SECURITY
     //!
-    bool isAlive;
-    //!
-    fastdds::dds::ParameterPropertyList_t m_properties;
-    //!
-    fastdds::dds::UserDataQosPolicy m_userData;
+    bool is_alive;
     //!
     TimedEvent* lease_duration_event;
     //!
@@ -135,30 +116,36 @@ public:
      * @param pdata Object to copy the data from
      * @return True on success
      */
-    bool updateData(
+    bool update_data(
             ParticipantProxyData& pdata);
 
     /**
      * Get the size in bytes of the CDR serialization of this object.
      * @param include_encapsulation Whether to include the size of the encapsulation info.
+     * @param force_including_optional_qos Whether to force including of the optional Qos.
      * @return size in bytes of the CDR serialization.
      */
     uint32_t get_serialized_size(
-            bool include_encapsulation) const;
+            bool include_encapsulation,
+            bool force_including_optional_qos = false) const;
 
     /**
      * Write as a parameter list on a CDRMessage_t
+     * @param msg CDRMessage_t to write to
+     * @param write_encapsulation Whether to write the encapsulation info.
+     * @param force_write_optional_qos Whether to write the optional Qos.
      * @return True on success
      */
-    bool writeToCDRMessage(
+    bool write_to_cdr_message(
             CDRMessage_t* msg,
-            bool write_encapsulation);
+            bool write_encapsulation,
+            bool force_write_optional_qos = false);
 
     /**
      * Read the parameter list from a received CDRMessage_t
      * @return True on success
      */
-    bool readFromCDRMessage(
+    bool read_from_cdr_message(
             CDRMessage_t* msg,
             bool use_encapsulation,
             NetworkFactory& network,
@@ -187,7 +174,7 @@ public:
      * @param guid valid GUID_t
      */
     void set_persistence_guid(
-            const GUID_t& guid);
+            const GUID_t& ps_guid);
 
     /**
      * Retrieve participant persistent GUID_t
@@ -228,9 +215,21 @@ public:
         return last_received_message_tm_;
     }
 
-    const std::chrono::microseconds& lease_duration() const
+    //! Getter for m_should_send_optional_qos.
+    bool should_send_optional_qos() const
     {
-        return lease_duration_;
+        return m_should_send_optional_qos;
+    }
+
+    /**
+     * Set whether optional QoS should be serialized and added to Data(p).
+     * @param should_send_optional_qos Boolean indicating whether optional QoS should be serialized
+     *                                 and added to Data(p).
+     */
+    void should_send_optional_qos(
+            bool should_send_optional_qos)
+    {
+        m_should_send_optional_qos = should_send_optional_qos;
     }
 
 private:
@@ -240,6 +239,9 @@ private:
 
     //! Remote participant lease duration in microseconds.
     std::chrono::microseconds lease_duration_;
+
+    //!Whether optional QoS should be serialized and added to Data(p)
+    bool m_should_send_optional_qos{false};
 };
 
 } // namespace rtps

@@ -45,6 +45,8 @@ if(ANDROID)
 endif()
 
 
+set(SERIALIZEDPAYLOADTESTS_SOURCE SerializedPayloadTests.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/common/SerializedPayload.cpp)
 set(SEQUENCENUMBERTESTS_SOURCE SequenceNumberTests.cpp)
 set(PORTPARAMETERSTESTS_SOURCE PortParametersTests.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/fastdds/core/Time_t.cpp
@@ -55,8 +57,10 @@ set(PORTPARAMETERSTESTS_SOURCE PortParametersTests.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetmaskFilterKind.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetworkInterface.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetworkInterfaceWithFilter.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/utils/Host.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/utils/IPFinder.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/utils/IPLocator.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/utils/md5.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/utils/SystemInfo.cpp)
 
 set(TIMETESTS_SOURCE TimeTests.cpp
@@ -93,17 +97,20 @@ target_link_libraries(GuidUtilsTests
     fastcdr
     fastdds::log
     GTest::gtest
+    $<$<BOOL:${WIN32}>:ws2_32>
+    $<$<BOOL:${QNX}>:socket>
     )
-if(QNX)
-    target_link_libraries(GuidUtilsTests socket)
-endif()
-if(MSVC OR MSVC_IDE)
-    target_link_libraries(GuidUtilsTests ws2_32)
-endif()
-if (APPLE)
-    target_link_libraries(GuidUtilsTests "-framework CoreFoundation" "-framework IOKit")
-endif()
 gtest_discover_tests(GuidUtilsTests)
+
+add_executable(SerializedPayloadTests ${SERIALIZEDPAYLOADTESTS_SOURCE})
+target_compile_definitions(SerializedPayloadTests PRIVATE
+    $<$<AND:$<NOT:$<BOOL:${WIN32}>>,$<STREQUAL:"${CMAKE_BUILD_TYPE}","Debug">>:__DEBUG>
+    $<$<BOOL:${INTERNAL_DEBUG}>:__INTERNALDEBUG> # Internal debug activated.
+    )
+target_include_directories(SerializedPayloadTests PRIVATE
+    ${PROJECT_SOURCE_DIR}/include ${PROJECT_BINARY_DIR}/include)
+target_link_libraries(SerializedPayloadTests GTest::gtest)
+gtest_discover_tests(SerializedPayloadTests)
 
 add_executable(SequenceNumberTests ${SEQUENCENUMBERTESTS_SOURCE})
 target_compile_definitions(SequenceNumberTests PRIVATE

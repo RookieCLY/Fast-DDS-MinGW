@@ -23,6 +23,7 @@
 #include <cstdlib>
 #include <memory>
 
+#include <fastdds/dds/core/ReturnCode.hpp>
 #include <fastdds/dds/publisher/qos/WriterQos.hpp>
 #include <fastdds/dds/subscriber/qos/ReaderQos.hpp>
 #include <fastdds/rtps/attributes/RTPSParticipantAttributes.hpp>
@@ -151,6 +152,20 @@ public:
             const fastdds::dds::WriterQos& qos);
 
     /**
+     * Register a Writer in the BuiltinProtocols.
+     *
+     * @param rtps_writer             Pointer to the RTPSWriter.
+     * @param topic                   Information regarding the topic where the writer is registering.
+     * @param pub_builtin_topic_data  Information on the publication endpoint.
+     *
+     * @return True if correctly registered.
+     */
+    dds::ReturnCode_t register_writer(
+            RTPSWriter* rtps_writer,
+            const TopicDescription& topic,
+            const PublicationBuiltinTopicData& pub_builtin_topic_data);
+
+    /**
      * Register a Reader in the BuiltinProtocols.
      *
      * @param rtps_reader     Pointer to the RTPSReader.
@@ -164,6 +179,22 @@ public:
             RTPSReader* rtps_reader,
             const TopicDescription& topic,
             const fastdds::dds::ReaderQos& qos,
+            const ContentFilterProperty* content_filter = nullptr);
+
+    /**
+     * Register a Reader in the BuiltinProtocols.
+     *
+     * @param rtps_reader             Pointer to the RTPSReader.
+     * @param topic                   Information regarding the topic where the reader is registering.
+     * @param sub_builtin_topic_data  Information on the subscription endpoint.
+     * @param content_filter          Optional content filtering information.
+     *
+     * @return True if correctly registered.
+     */
+    dds::ReturnCode_t register_reader(
+            RTPSReader* rtps_reader,
+            const TopicDescription& topic,
+            const SubscriptionBuiltinTopicData& sub_builtin_topic_data,
             const ContentFilterProperty* content_filter = nullptr);
 
     /**
@@ -201,11 +232,41 @@ public:
      */
     std::vector<std::string> getParticipantNames() const;
 
+    FASTDDS_TODO_BEFORE(4, 0,
+            "Make RTPSParticipantAttributes a composition of RTPSParticipantConstantAttributes and RTPSParticipantMutableAttributes");
     /**
-     * Get a reference of the current state of the RTPSParticipantParameters.
+     * Get a reference of the current state of the RTPSParticipantAttributes.
+     * @warning The returned reference is not thread safe. It is recommended to use copy_attributes()
+     * instead to get a thread safe copy of the attributes.
      * @return RTPSParticipantAttributes reference.
      */
     const RTPSParticipantAttributes& get_attributes() const;
+
+    FASTDDS_TODO_BEFORE(4, 0,
+            "Make RTPSParticipantAttributes a composition of RTPSParticipantConstantAttributes and RTPSParticipantMutableAttributes");
+    /**
+     * @brief Get a const reference of RTPSParticipantConstantAttributes of this RTPSParticipantImpl.
+     * This method is thread safe because it returns a const reference to the internal constant attributes.
+     * @return A const reference to the RTPSParticipantConstantAttributes of this RTPSParticipantImpl.
+     */
+    const RTPSParticipantConstantAttributes& get_const_attributes() const;
+
+    FASTDDS_TODO_BEFORE(4, 0,
+            "Make RTPSParticipantAttributes a composition of RTPSParticipantConstantAttributes and RTPSParticipantMutableAttributes");
+    /**
+     * @brief Get a const copy of RTPSParticipantMutableAttributes of this RTPSParticipantImpl.
+     * This method is thread safe because it returns a const copy of the internal mutable attributes.
+     * @return A const copy of the RTPSParticipantMutableAttributes of this RTPSParticipantImpl.
+     */
+    const RTPSParticipantMutableAttributes get_mutable_attributes() const;
+
+    FASTDDS_TODO_BEFORE(4, 0,
+            "Make RTPSParticipantAttributes a composition of RTPSParticipantConstantAttributes and RTPSParticipantMutableAttributes");
+    /**
+     * Get a copy of the current state of the RTPSParticipantAttributes.
+     * @return RTPSParticipantAttributes copy.
+     */
+    RTPSParticipantAttributes copy_attributes() const;
 
     /**
      * Retrieves the maximum message size.

@@ -18,7 +18,7 @@
 #include <cstring>
 #include <algorithm>
 
-#include <asio.hpp>
+#include "../network/asio.hpp"
 #include <fastdds/dds/log/Log.hpp>
 #include <fastdds/rtps/transport/TCPv6TransportDescriptor.hpp>
 #include <fastdds/utils/IPLocator.hpp>
@@ -127,7 +127,7 @@ TCPv6Transport::TCPv6Transport(
                         [infoIP](const AllowedNetworkInterface& allowlist_element)
                         {
                             return allowlist_element.name == infoIP.dev ||
-                            compare_ips(allowlist_element.name, infoIP.name);
+                                   compare_ips(allowlist_element.name, infoIP.name);
                         }) != allow_end ))
                 {
                     EPROSIMA_LOG_WARNING(TRANSPORT_TCPV6,
@@ -139,7 +139,7 @@ TCPv6Transport::TCPv6Transport(
             }
             else if (descriptor.interfaceWhiteList.empty() && descriptor.interface_allowlist.empty())
             {
-                interface_whitelist_.emplace_back(ip::address_v6::from_string(infoIP.name));
+                interface_whitelist_.emplace_back(ip::make_address_v6(infoIP.name));
                 allowed_interfaces_.emplace_back(infoIP.dev, infoIP.name, infoIP.masked_locator,
                         descriptor.netmask_filter);
             }
@@ -151,7 +151,7 @@ TCPv6Transport::TCPv6Transport(
                     [&infoIP](const AllowedNetworkInterface& allowlist_element)
                     {
                         return allowlist_element.name == infoIP.dev || compare_ips(allowlist_element.name,
-                        infoIP.name);
+                               infoIP.name);
                     });
                 if (allow_it != allow_end)
                 {
@@ -159,7 +159,7 @@ TCPv6Transport::TCPv6Transport(
                     if (network::netmask_filter::validate_and_transform(netmask_filter,
                             descriptor.netmask_filter))
                     {
-                        interface_whitelist_.emplace_back(ip::address_v6::from_string(infoIP.name));
+                        interface_whitelist_.emplace_back(ip::make_address_v6(infoIP.name));
                         allowed_interfaces_.emplace_back(infoIP.dev, infoIP.name, infoIP.masked_locator,
                                 netmask_filter);
                     }
@@ -167,9 +167,10 @@ TCPv6Transport::TCPv6Transport(
                     {
                         EPROSIMA_LOG_WARNING(TRANSPORT_TCPV6,
                                 "Ignoring allowed interface " << infoIP.dev << ": " << infoIP.name
-                                                              << " as its netmask filter configuration (" << netmask_filter << ") is incompatible"
-                                                              << " with descriptor's (" << descriptor.netmask_filter <<
-                                ").");
+                                                              << " as its netmask filter configuration ("
+                                                              << netmask_filter << ") is incompatible"
+                                                              << " with descriptor's (" << descriptor.netmask_filter
+                                                              << ").");
                     }
                 }
             }
@@ -180,7 +181,7 @@ TCPv6Transport::TCPv6Transport(
                             return whitelist_element == infoIP.dev || compare_ips(whitelist_element, infoIP.name);
                         }) != white_end )
                 {
-                    interface_whitelist_.emplace_back(ip::address_v6::from_string(infoIP.name));
+                    interface_whitelist_.emplace_back(ip::make_address_v6(infoIP.name));
                     allowed_interfaces_.emplace_back(infoIP.dev, infoIP.name, infoIP.masked_locator,
                             descriptor.netmask_filter);
                 }
@@ -190,7 +191,7 @@ TCPv6Transport::TCPv6Transport(
         if (interface_whitelist_.empty())
         {
             EPROSIMA_LOG_ERROR(TRANSPORT_TCPV6, "All whitelist interfaces were filtered out");
-            interface_whitelist_.emplace_back(ip::address_v6::from_string("2001:db8::"));
+            interface_whitelist_.emplace_back(ip::make_address_v6("2001:db8::"));
         }
     }
 
@@ -331,7 +332,7 @@ bool TCPv6Transport::is_interface_whitelist_empty() const
 bool TCPv6Transport::is_interface_allowed(
         const std::string& iface) const
 {
-    return is_interface_allowed(asio::ip::address_v6::from_string(iface));
+    return is_interface_allowed(asio::ip::make_address_v6(iface));
 }
 
 bool TCPv6Transport::is_interface_allowed(
@@ -470,7 +471,7 @@ asio::ip::tcp TCPv6Transport::generate_protocol() const
 bool TCPv6Transport::is_interface_allowed(
         const Locator& loc) const
 {
-    asio::ip::address_v6 ip = asio::ip::address_v6::from_string(IPLocator::toIPv6string(loc));
+    asio::ip::address_v6 ip = asio::ip::make_address_v6(IPLocator::toIPv6string(loc));
     return is_interface_allowed(ip);
 }
 

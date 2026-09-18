@@ -293,9 +293,27 @@ struct PropertyParser
             exception);
     }
 
+    /**
+     * @brief Parse a property value as a boolean
+     * @param property Property to parse
+     * @return The parsed boolean value
+     *
+     */
+    inline static bool as_bool(
+            const Property& property)
+    {
+        bool ret = false;
+        const std::string& value = property.value();
+        if (value == "true" || value == "TRUE" || value == "True" || value == "1")
+        {
+            ret = true;
+        }
+        return ret;
+    }
+
 private:
 
-    template <typename value_t,
+    template<typename value_t,
             typename exception_t>
     inline static value_t parse_value(
             const std::function<value_t(const Property&)>& conversor,

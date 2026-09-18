@@ -164,7 +164,7 @@ public:
         std::cout << "  -p <num>, --connection-port <num>    Port of the Server to connect to"         << std::endl;
         std::cout << "                                       (Default port: 16166)."                   << std::endl;
         std::cout << "                                       (0 by default)."                          << std::endl;
-        std::cout << "            --transport <str>          [udpv4|udpv6|tcpv4|tcpv6|shm] "           << std::endl;
+        std::cout << "            --transport <str>          [udpv4|udpv6|tcpv4|tcpv6] "               << std::endl;
         std::cout << "                                       (udpv4 by default)."                      << std::endl;
         std::cout << ""                                                                                << std::endl;
         std::cout << "Publisher options:"                                                              << std::endl;
@@ -289,12 +289,6 @@ public:
                         config.srv_config.transport_kind = TransportKind::TCPv6;
                         uses_ipv6 = true;
                     }
-                    else if (input == "shm")
-                    {
-                        config.pub_config.transport_kind = TransportKind::SHM;
-                        config.sub_config.transport_kind = TransportKind::SHM;
-                        config.srv_config.transport_kind = TransportKind::SHM;
-                    }
                     else
                     {
                         EPROSIMA_LOG_ERROR(CLI_PARSER, "Unkown transport argument: " + input);
@@ -372,16 +366,24 @@ public:
             // PubSub options
             else if (arg == "-t" || arg == "--topic")
             {
-                if (config.entity == CLIParser::EntityKind::CLIENT_PUBLISHER ||
-                        config.entity == CLIParser::EntityKind::CLIENT_SUBSCRIBER)
+                if (++i < argc)
                 {
-                    config.pub_config.topic_name = argv[i];
-                    config.sub_config.topic_name = argv[i];
+                    if (config.entity == CLIParser::EntityKind::CLIENT_PUBLISHER ||
+                            config.entity == CLIParser::EntityKind::CLIENT_SUBSCRIBER)
+                    {
+                        config.pub_config.topic_name = argv[i];
+                        config.sub_config.topic_name = argv[i];
+                    }
+                    else
+                    {
+                        EPROSIMA_LOG_ERROR(CLI_PARSER,
+                                "wrong or missing entity for --topic argument: only available for publisher and subscriber");
+                        print_help(EXIT_FAILURE);
+                    }
                 }
                 else
                 {
-                    EPROSIMA_LOG_ERROR(CLI_PARSER,
-                            "wrong or missing entity for --topic argument: only available for publisher and subscriber");
+                    EPROSIMA_LOG_ERROR(CLI_PARSER, "missing argument for " + arg);
                     print_help(EXIT_FAILURE);
                 }
             }

@@ -59,6 +59,7 @@ class TimedEvent;
 namespace dds {
 
 class ContentFilteredTopicImpl;
+class DataWriter;
 class Subscriber;
 class SubscriberImpl;
 class TopicDescription;
@@ -223,7 +224,7 @@ public:
      * Get topic data type
      * @return Topic data type
      */
-    TypeSupport type();
+    TypeSupport type() const;
 
     /**
      * Get TopicDescription
@@ -410,6 +411,35 @@ public:
     ReturnCode_t get_subscription_builtin_topic_data(
             SubscriptionBuiltinTopicData& subscription_data) const;
 
+    /**
+     * This operation sets the key of the DataWriter that is related to this DataReader.
+     * This is used to establish a relationship between a DataReader and a DataWriter
+     * in the context of RPC over DDS.
+     *
+     * @warning This operation is only valid if the entity is not enabled.
+     *
+     * @param [in] related_writer Pointer to the DataWriter to set as related.
+     *
+     * @return RETCODE_OK if the key is set successfully.
+     * @return RETCODE_ILLEGAL_OPERATION if this entity is enabled.
+     * @return RETCODE_PRECONDITION_NOT_MET if the entity does not belong to the same participant.
+     * @return RETCODE_BAD_PARAMETER if the provided GUID is unknown
+     * @return RETCODE_UNSUPPORTED if the implementation does not support RPC over DDS
+     * or the pointer is not valid.
+     */
+    ReturnCode_t set_related_datawriter(
+            const DataWriter* related_writer);
+
+    /**
+     * @brief Set the type support context to be used when deserializing data for this DataReader.
+     *
+     * @param context Shared pointer to the type support context to be used for deserialization.
+     *
+     * @pre The DataReader must not be enabled.
+     */
+    void set_type_support_context(
+            const std::shared_ptr<TopicDataType::Context>& context);
+
 protected:
 
     //!Subscriber
@@ -426,7 +456,7 @@ protected:
     DataReaderQos qos_;
 
     //!History
-    detail::DataReaderHistory history_;
+    std::unique_ptr<detail::DataReaderHistory> history_ {};
 
     //!Listener
     DataReaderListener* listener_ = nullptr;
@@ -481,7 +511,10 @@ protected:
                 const uint32_t& status_id);
 #endif //FASTDDS_STATISTICS
 
+    private:
+
         DataReaderImpl* data_reader_;
+        std::mutex matching_info_mutex_;
 
     }
     reader_listener_;
@@ -573,6 +606,9 @@ protected:
     // State of the History mask last time it was queried
     // protected with the RTPSReader mutex
     detail::StateFilter last_mask_state_ {};
+
+    // Context to use when calling type support methods
+    std::shared_ptr<TopicDataType::Context> type_support_context_ {};
 
     ReturnCode_t check_collection_preconditions_and_calc_max_samples(
             LoanableCollection& data_values,
@@ -675,6 +711,17 @@ protected:
 
 private:
 
+    /**
+     *  (Re)configures the deadline timer:
+     *  In case of infinite deadline period cancel it, for 0 warn and notify once (with max counts), and
+     *  for non-infinite positive values store period.
+     */
+    void configure_deadline_timer_();
+
+    /**
+     * Notifies listeners that a deadline has been missed.
+     */
+    void notify_deadline_missed_nts_();
     void update_rtps_reader_qos();
 
     DataReaderQos get_datareader_qos_from_settings(

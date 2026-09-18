@@ -54,7 +54,7 @@ SystemInfo::SystemInfo()
     defined(_POSIX_SOURCE) || defined(__unix__)
     tzset();
 #endif // if (_POSIX_C_SOURCE >= 1) || defined(_XOPEN_SOURCE) || defined(_BSD_SOURCE) || defined(_SVID_SOURCE) ||
-       // defined(_POSIX_SOURCE) || defined(__unix__)
+    // defined(_POSIX_SOURCE) || defined(__unix__)
 
     update_interfaces();
 }
@@ -139,10 +139,12 @@ fastdds::dds::ReturnCode_t SystemInfo::get_username(
     return fastdds::dds::RETCODE_OK;
 #else
     uid_t user_id = geteuid();
-    struct passwd* pwd = getpwuid(user_id);
-    if (pwd != nullptr)
+    struct passwd pwd {};
+    struct passwd* result = nullptr;
+    char buf[1024];
+    if (getpwuid_r(user_id, &pwd, buf, sizeof(buf), &result) == 0 && result != nullptr)
     {
-        username = pwd->pw_name;
+        username = pwd.pw_name;
         if (!username.empty())
         {
             return fastdds::dds::RETCODE_OK;

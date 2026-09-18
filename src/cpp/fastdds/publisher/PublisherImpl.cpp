@@ -690,6 +690,41 @@ bool PublisherImpl::can_be_deleted()
     return can_be_deleted;
 }
 
+bool PublisherImpl::can_be_deleted(
+        DataWriter* writer) const
+{
+    if (!writer)
+    {
+        EPROSIMA_LOG_ERROR(PUBLISHER, "DataWriter is nullptr.");
+        return false;
+    }
+
+    if (user_publisher_ != writer->get_publisher())
+    {
+        EPROSIMA_LOG_ERROR(PUBLISHER, "DataWriter does not belong to this Publisher.");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mtx_writers_);
+    auto it = writers_.find(writer->get_topic()->get_name());
+
+    if (it != writers_.end())
+    {
+        auto dw_it = std::find(it->second.begin(), it->second.end(), writer->impl_);
+
+        if (dw_it == it->second.end())
+        {
+            EPROSIMA_LOG_ERROR(PUBLISHER, "DataWriter implementation not found.");
+            return false;
+        }
+
+        return (*dw_it)->check_delete_preconditions() == RETCODE_OK;
+    }
+
+    EPROSIMA_LOG_ERROR(PUBLISHER, "DataWriter not found.");
+    return false;
+}
+
 const InstanceHandle_t& PublisherImpl::get_instance_handle() const
 {
     return handle_;
@@ -719,17 +754,14 @@ void PublisherImpl::set_qos(
     if (first_time && !(to.presentation() == from.presentation()))
     {
         to.presentation(from.presentation());
-        to.presentation().hasChanged = true;
     }
     if (!(to.partition() == from.partition()))
     {
         to.partition() = from.partition();
-        to.partition().hasChanged = true;
     }
     if (!(to.group_data() == from.group_data()))
     {
         to.group_data() = from.group_data();
-        to.group_data().hasChanged = true;
     }
     if (!(to.entity_factory() == from.entity_factory()))
     {

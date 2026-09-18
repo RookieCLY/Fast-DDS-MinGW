@@ -134,19 +134,19 @@ To run this application once inside the Docker container run:
 
 eProsima Shapes Demo usage information can be found on the [Shapes Demo First Steps page](https://eprosima-shapes-demo.readthedocs.io/en/latest/first_steps/first_steps.html).
 
-### Fast DDS Monitor
+### DDS Monitor
 
-eProsima Fast DDS Monitor is a graphical desktop application aimed at monitoring DDS environments deployed using the *eProsima Fast DDS* library.
+eProsima DDS Monitor is a graphical desktop application aimed at monitoring DDS environments deployed using the *eProsima Fast DDS* library.
 Thus, the user can monitor in real time the status of publication/subscription communications between DDS entities.
 They can also choose from a wide variety of communication parameters to be measured (latency, throughput,packet loss, etc.), as well as record and compute in real time statistical measurements on these parameters (mean, variance, standard deviation, etc.).
 
-You can read more about this application on the [Fast DDS Monitor documentation page](https://fast-dds-monitor.readthedocs.io/).
+You can read more about this application on the [DDS Monitor documentation page](https://dds-monitor.docs.eprosima.com/).
 
 To run this application once inside the Docker container run:
 
-    $ fastdds_monitor
+    $ dds_monitor
 
-eProsima Fast DDS Monitor usage information can be found on the [Fast DDS Monitor User Manual](https://fast-dds-monitor.readthedocs.io/en/latest/rst/user_manual/initialize_monitoring.html).
+eProsima DDS Monitor usage information can be found on the [DDS Monitor User Manual](https://dds-monitor.docs.eprosima.com/en/latest/rst/user_manual/initialize_monitoring.html).
 
 
 ### Fast DDS libraries and Examples
@@ -188,14 +188,14 @@ or
 -->
 
 <a href="http://rosin-project.eu">
-  <img src="http://rosin-project.eu/wp-content/uploads/rosin_ack_logo_wide.png"
+  <img src="https://raw.githubusercontent.com/rosin-project/press_kit/master/img/rosin_ack_logo_wide.png"
        alt="rosin_logo" height="60" >
 </a>
 
 Supported by ROSIN - ROS-Industrial Quality-Assured Robot Software Components.
 More information: <a href="http://rosin-project.eu">rosin-project.eu</a>
 
-<img src="http://rosin-project.eu/wp-content/uploads/rosin_eu_flag.jpg"
+<img src="https://raw.githubusercontent.com/rosin-project/press_kit/master/img/rosin_eu_flag.jpg"
      alt="eu_flag" height="45" align="left" >
 
 This project has received funding from the European Union’s Horizon 2020 research and innovation programme under grant agreement no. 732287.

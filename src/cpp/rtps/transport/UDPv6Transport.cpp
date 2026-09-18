@@ -156,7 +156,7 @@ UDPv6Transport::UDPv6Transport(
                         [infoIP](const AllowedNetworkInterface& allowlist_element)
                         {
                             return allowlist_element.name == infoIP.dev ||
-                            compare_ips(allowlist_element.name, infoIP.name);
+                                   compare_ips(allowlist_element.name, infoIP.name);
                         }) != allow_end ))
                 {
                     EPROSIMA_LOG_WARNING(TRANSPORT_UDPV6,
@@ -167,7 +167,7 @@ UDPv6Transport::UDPv6Transport(
             }
             else if (descriptor.interfaceWhiteList.empty() && descriptor.interface_allowlist.empty())
             {
-                interface_whitelist_.emplace_back(ip::address_v6::from_string(infoIP.name));
+                interface_whitelist_.emplace_back(ip::make_address_v6(infoIP.name));
                 allowed_interfaces_.emplace_back(infoIP.dev, infoIP.name, infoIP.masked_locator,
                         descriptor.netmask_filter);
             }
@@ -179,7 +179,7 @@ UDPv6Transport::UDPv6Transport(
                     [&infoIP](const AllowedNetworkInterface& allowlist_element)
                     {
                         return allowlist_element.name == infoIP.dev || compare_ips(allowlist_element.name,
-                        infoIP.name);
+                               infoIP.name);
                     });
                 if (allow_it != allow_end)
                 {
@@ -187,7 +187,7 @@ UDPv6Transport::UDPv6Transport(
                     if (network::netmask_filter::validate_and_transform(netmask_filter,
                             descriptor.netmask_filter))
                     {
-                        interface_whitelist_.emplace_back(ip::address_v6::from_string(infoIP.name));
+                        interface_whitelist_.emplace_back(ip::make_address_v6(infoIP.name));
                         allowed_interfaces_.emplace_back(infoIP.dev, infoIP.name, infoIP.masked_locator,
                                 netmask_filter);
                     }
@@ -195,9 +195,10 @@ UDPv6Transport::UDPv6Transport(
                     {
                         EPROSIMA_LOG_WARNING(TRANSPORT_UDPV6,
                                 "Ignoring allowed interface " << infoIP.dev << ": " << infoIP.name
-                                                              << " as its netmask filter configuration (" << netmask_filter << ") is incompatible"
-                                                              << " with descriptor's (" << descriptor.netmask_filter <<
-                                ").");
+                                                              << " as its netmask filter configuration ("
+                                                              << netmask_filter << ") is incompatible"
+                                                              << " with descriptor's (" << descriptor.netmask_filter
+                                                              << ").");
                     }
                 }
             }
@@ -208,7 +209,7 @@ UDPv6Transport::UDPv6Transport(
                             return whitelist_element == infoIP.dev || compare_ips(whitelist_element, infoIP.name);
                         }) != white_end )
                 {
-                    interface_whitelist_.emplace_back(ip::address_v6::from_string(infoIP.name));
+                    interface_whitelist_.emplace_back(ip::make_address_v6(infoIP.name));
                     allowed_interfaces_.emplace_back(infoIP.dev, infoIP.name, infoIP.masked_locator,
                             descriptor.netmask_filter);
                 }
@@ -218,7 +219,7 @@ UDPv6Transport::UDPv6Transport(
         if (interface_whitelist_.empty())
         {
             EPROSIMA_LOG_ERROR(TRANSPORT_UDPV6, "All whitelist interfaces were filtered out");
-            interface_whitelist_.emplace_back(ip::address_v6::from_string("2001:db8::"));
+            interface_whitelist_.emplace_back(ip::make_address_v6("2001:db8::"));
         }
     }
 }
@@ -256,7 +257,7 @@ bool UDPv6Transport::getDefaultMetatrafficMulticastLocators(
     Locator locator;
     locator.kind = LOCATOR_KIND_UDPv6;
     locator.port = static_cast<uint16_t>(metatraffic_multicast_port);
-    IPLocator::setIPv6(locator, "ff1e::ffff:efff:1");
+    IPLocator::setIPv6(locator, DEFAULT_METATRAFFIC_MULTICAST_ADDRESS_v6);
     locators.push_back(locator);
     return true;
 }
@@ -271,6 +272,18 @@ bool UDPv6Transport::getDefaultMetatrafficUnicastLocators(
     locator.set_Invalid_Address();
     locators.push_back(locator);
 
+    return true;
+}
+
+bool UDPv6Transport::getDefaultMulticastLocators(
+        LocatorList& locators,
+        uint32_t multicast_port) const
+{
+    Locator locator;
+    locator.kind = LOCATOR_KIND_UDPv6;
+    locator.port = static_cast<uint16_t>(multicast_port);
+    IPLocator::setIPv6(locator, DEFAULT_MULTICAST_ADDRESS_v6);
+    locators.push_back(locator);
     return true;
 }
 
@@ -292,7 +305,7 @@ void UDPv6Transport::AddDefaultOutputLocator(
 {
     // TODO What is the default IPv6 address?
     Locator temp;
-    IPLocator::createLocator(LOCATOR_KIND_UDPv6, "ff1e::ffff:efff:1", 0, temp);
+    IPLocator::createLocator(LOCATOR_KIND_UDPv6, DEFAULT_MULTICAST_ADDRESS_v6, 0, temp);
     defaultList.push_back(temp);
 }
 
@@ -351,7 +364,7 @@ ip::udp::endpoint UDPv6Transport::generate_endpoint(
         const std::string& sIp,
         uint16_t port)
 {
-    return asio::ip::udp::endpoint(ip::address_v6::from_string(sIp), port);
+    return asio::ip::udp::endpoint(ip::make_address_v6(sIp), port);
 }
 
 ip::udp::endpoint UDPv6Transport::generate_endpoint(
@@ -391,7 +404,7 @@ eProsimaUDPSocket UDPv6Transport::OpenAndBindInputSocket(
         uint16_t port,
         bool is_multicast)
 {
-    eProsimaUDPSocket socket = createUDPSocket(io_service_);
+    eProsimaUDPSocket socket = createUDPSocket(io_context_);
     getSocketPtr(socket)->open(generate_protocol());
     if (mReceiveBufferSize != 0)
     {
@@ -453,7 +466,7 @@ bool UDPv6Transport::OpenInputChannel(
     if (IPLocator::isMulticast(locator) && IsInputChannelOpen(locator))
     {
         std::string locatorAddressStr = IPLocator::toIPv6string(locator);
-        ip::address_v6 locatorAddress = ip::address_v6::from_string(locatorAddressStr);
+        ip::address_v6 locatorAddress = ip::make_address_v6(locatorAddressStr);
 
 #ifndef _WIN32
         if (!is_interface_whitelist_empty())
@@ -492,8 +505,9 @@ bool UDPv6Transport::OpenInputChannel(
                 }
                 catch (asio::system_error const& e)
                 {
-                    EPROSIMA_LOG_WARNING(TRANSPORT_UDPV6, "UDPTransport Error binding " << locatorAddressStr << " at port: (" <<
-                            IPLocator::getPhysicalPort(
+                    EPROSIMA_LOG_WARNING(TRANSPORT_UDPV6,
+                            "UDPTransport Error binding " << locatorAddressStr << " at port: ("
+                                                          << IPLocator::getPhysicalPort(
                                 locator) << ") with msg: " << e.what());
                     (void)e;
                 }
@@ -513,7 +527,7 @@ bool UDPv6Transport::OpenInputChannel(
                     get_ipv6s_unique_interfaces(locNames, true, false);
                     for (const auto& infoIP : locNames)
                     {
-                        auto ip = asio::ip::address_v6::from_string(infoIP.name);
+                        auto ip = asio::ip::make_address_v6(infoIP.name);
                         try
                         {
                             channelResource->socket()->set_option(ip::multicast::join_group(locatorAddress,
@@ -529,7 +543,7 @@ bool UDPv6Transport::OpenInputChannel(
                 }
                 else
                 {
-                    auto ip = asio::ip::address_v6::from_string(channelResource->iface());
+                    auto ip = asio::ip::make_address_v6(channelResource->iface());
                     try
                     {
                         channelResource->socket()->set_option(ip::multicast::join_group(locatorAddress, ip.scope_id()));
@@ -573,7 +587,7 @@ bool UDPv6Transport::is_interface_allowed(
         return true;
     }
 
-    if (asio::ip::address_v6::from_string(iface) == ip::address_v6::any())
+    if (asio::ip::make_address_v6(iface) == ip::address_v6::any())
     {
         return true;
     }
@@ -700,7 +714,7 @@ void UDPv6Transport::SetSocketOutboundInterface(
     }
 #endif // ifdef __APPLE__
     getSocketPtr(socket)->set_option(ip::multicast::outbound_interface(
-                asio::ip::address_v6::from_string(sIp).scope_id()));
+                asio::ip::make_address_v6(sIp).scope_id()));
 }
 
 bool UDPv6Transport::compare_ips(

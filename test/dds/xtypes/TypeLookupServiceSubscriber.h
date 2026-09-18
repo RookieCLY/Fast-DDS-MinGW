@@ -80,9 +80,14 @@ public:
 
     bool init(
             uint32_t domain_id,
-            std::vector<std::string> known_types);
+            std::vector<std::string> known_types,
+            uint32_t builtin_flow_controller_bytes);
 
     bool wait_discovery(
+            uint32_t expected_matches,
+            uint32_t timeout);
+
+    bool wait_participant_discovery(
             uint32_t expected_matches,
             uint32_t timeout);
 
@@ -103,6 +108,12 @@ public:
             const eprosima::fastdds::dds::PublicationBuiltinTopicData& info,
             bool& should_be_ignored) override;
 
+    void on_participant_discovery(
+            DomainParticipant* participant,
+            eprosima::fastdds::rtps::ParticipantDiscoveryStatus status,
+            const ParticipantBuiltinTopicData& info,
+            bool& should_be_ignored) override;
+
 private:
 
     bool setup_subscriber(
@@ -111,11 +122,11 @@ private:
     bool create_known_type(
             const std::string& type);
 
-    template <typename Type, typename TypePubSubType>
+    template<typename Type, typename TypePubSubType>
     bool create_known_type_impl(
             const std::string& type);
 
-    template <typename Type>
+    template<typename Type>
     bool process_type_impl(
             DataReader* reader);
 
@@ -133,6 +144,7 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     int32_t matched_ {0};
+    int32_t participant_matched_ {0};
     uint32_t expected_matches_ {0};
     std::map<eprosima::fastdds::rtps::GUID_t, uint32_t> received_samples_;
 
@@ -441,8 +453,6 @@ private:
         SUBSCRIBER_TYPE_CREATOR_FUNCTION(FinalUnionStruct);
         SUBSCRIBER_TYPE_CREATOR_FUNCTION(FinalWCharStruct);
         SUBSCRIBER_TYPE_CREATOR_FUNCTION(InheritanceEmptyStruct);
-        SUBSCRIBER_TYPE_CREATOR_FUNCTION(InnerEmptyStructureHelper);
-        SUBSCRIBER_TYPE_CREATOR_FUNCTION(InnerStructureHelper);
         SUBSCRIBER_TYPE_CREATOR_FUNCTION(BitsetsChildInheritanceStruct);
         SUBSCRIBER_TYPE_CREATOR_FUNCTION(InnerEmptyStructureHelperChild);
         SUBSCRIBER_TYPE_CREATOR_FUNCTION(InnerStructureHelperChild);

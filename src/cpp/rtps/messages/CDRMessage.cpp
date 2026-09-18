@@ -33,6 +33,21 @@ namespace eprosima {
 namespace fastdds {
 namespace rtps {
 
+void clamp_uint64_to_size_t(
+        const uint64_t& value,
+        size_t& result)
+{
+    constexpr uint64_t max_size_t = std::numeric_limits<size_t>::max();
+    if (value >= max_size_t)
+    {
+        result = max_size_t;
+    }
+    else
+    {
+        result = static_cast<size_t>(value);
+    }
+}
+
 bool CDRMessage::initCDRMsg(
         CDRMessage_t* msg,
         uint32_t payload_size)
@@ -72,16 +87,67 @@ bool CDRMessage::appendMsg(
     return(CDRMessage::addData(first, second->buffer, second->length));
 }
 
+static inline bool check_available_data(
+        CDRMessage_t* msg,
+        uint32_t size)
+{
+    uint64_t next_pos = static_cast<uint64_t>(msg->pos) + static_cast<uint64_t>(size);
+    return next_pos <= static_cast<uint64_t>(msg->length);
+}
+
+static inline bool check_available_data(
+        CDRMessage_t* msg,
+        uint32_t num_items,
+        uint32_t item_size)
+{
+    uint64_t size = static_cast<uint64_t>(num_items) * static_cast<uint64_t>(item_size);
+    uint64_t next_pos = static_cast<uint64_t>(msg->pos) + size;
+    return next_pos <= static_cast<uint64_t>(msg->length);
+}
+
+static inline bool read_with_endian(
+        CDRMessage_t* msg,
+        void* dest,
+        uint32_t size)
+{
+    // Check for available data
+    if (!check_available_data(msg, size))
+    {
+        return false;
+    }
+
+    // Copy forward or reversed depending on endianness
+    octet* dest_octets = (octet*)dest;
+    if (msg->msg_endian == DEFAULT_ENDIAN)
+    {
+        for (uint32_t i = 0; i < size; i++)
+        {
+            dest_octets[i] = msg->buffer[msg->pos + i];
+        }
+    }
+    else
+    {
+        for (uint32_t i = 0; i < size; i++)
+        {
+            dest_octets[i] = msg->buffer[msg->pos + size - 1 - i];
+        }
+    }
+
+    // Advance position
+    msg->pos += size;
+    return true;
+}
+
 bool CDRMessage::readEntityId(
         CDRMessage_t* msg,
         EntityId_t* id)
 {
-    if (msg->pos + 4 > msg->length)
+    if (!check_available_data(msg, EntityId_t::size))
     {
         return false;
     }
-    memcpy(id->value, &msg->buffer[msg->pos], id->size);
-    msg->pos += 4;
+    memcpy(id->value, &msg->buffer[msg->pos], EntityId_t::size);
+    msg->pos += EntityId_t::size;
     return true;
 }
 
@@ -94,7 +160,7 @@ bool CDRMessage::readData(
     {
         return false;
     }
-    if (msg->pos + length > msg->length)
+    if (!check_available_data(msg, length))
     {
         return false;
     }
@@ -110,165 +176,54 @@ bool CDRMessage::readData(
     return true;
 }
 
-bool CDRMessage::read_array_with_max_size(
-        CDRMessage_t* msg,
-        octet* arr,
-        size_t max_size)
-{
-    if (msg->pos + 4 > msg->length)
-    {
-        return false;
-    }
-    uint32_t datasize;
-    bool valid = CDRMessage::readUInt32(msg, &datasize);
-    if (max_size < datasize)
-    {
-        return false;
-    }
-    valid &= CDRMessage::readData(msg, arr, datasize);
-    msg->pos = (msg->pos + 3u) & ~3u;
-    return valid;
-}
-
-bool CDRMessage::readDataReversed(
-        CDRMessage_t* msg,
-        octet* o,
-        uint32_t length)
-{
-    for (uint32_t i = 0; i < length; i++)
-    {
-        *(o + i) = *(msg->buffer + msg->pos + length - 1 - i);
-    }
-    msg->pos += length;
-    return true;
-}
-
 bool CDRMessage::readInt32(
         CDRMessage_t* msg,
         int32_t* lo)
 {
-    if (msg->pos + 4 > msg->length)
-    {
-        return false;
-    }
-    octet* dest = (octet*)lo;
-    if (msg->msg_endian == DEFAULT_ENDIAN)
-    {
-        for (uint8_t i = 0; i < 4; i++)
-        {
-            dest[i] = msg->buffer[msg->pos + i];
-        }
-        msg->pos += 4;
-    }
-    else
-    {
-        readDataReversed(msg, dest, 4);
-    }
-    return true;
+    return read_with_endian(msg, lo, sizeof(int32_t));
 }
 
 bool CDRMessage::readUInt32(
         CDRMessage_t* msg,
         uint32_t* ulo)
 {
-    if (msg->pos + 4 > msg->length)
-    {
-        return false;
-    }
-    octet* dest = (octet*)ulo;
-    if (msg->msg_endian == DEFAULT_ENDIAN)
-    {
-        for (uint8_t i = 0; i < 4; i++)
-        {
-            dest[i] = msg->buffer[msg->pos + i];
-        }
-        msg->pos += 4;
-    }
-    else
-    {
-        readDataReversed(msg, dest, 4);
-    }
-    return true;
+    return read_with_endian(msg, ulo, sizeof(uint32_t));
 }
 
 bool CDRMessage::readInt64(
         CDRMessage_t* msg,
         int64_t* lolo)
 {
-    if (msg->pos + 8 > msg->length)
-    {
-        return false;
-    }
-
-    octet* dest = (octet*)lolo;
-    if (msg->msg_endian == DEFAULT_ENDIAN)
-    {
-        for (uint8_t i = 0; i < 8; ++i)
-        {
-            dest[i] = msg->buffer[msg->pos + i];
-        }
-
-        msg->pos += 8;
-    }
-    else
-    {
-        readDataReversed(msg, dest, 8);
-    }
-
-    return true;
+    return read_with_endian(msg, lolo, sizeof(int64_t));
 }
 
 bool CDRMessage::readUInt64(
         CDRMessage_t* msg,
         uint64_t* ulolo)
 {
-    if (msg->pos + 8 > msg->length)
-    {
-        return false;
-    }
-
-    octet* dest = (octet*)ulolo;
-    if (msg->msg_endian == DEFAULT_ENDIAN)
-    {
-        for (uint8_t i = 0; i < 8; ++i)
-        {
-            dest[i] = msg->buffer[msg->pos + i];
-        }
-
-        msg->pos += 8;
-    }
-    else
-    {
-        readDataReversed(msg, dest, 8);
-    }
-
-    return true;
+    return read_with_endian(msg, ulolo, sizeof(uint64_t));
 }
 
 bool CDRMessage::readSequenceNumber(
         CDRMessage_t* msg,
         SequenceNumber_t* sn)
 {
-    if (msg->pos + 8 > msg->length)
+    if (!check_available_data(msg, sizeof(uint32_t) + sizeof(uint32_t)))
     {
         return false;
     }
-    bool valid = readInt32(msg, &sn->high);
-    valid &= readUInt32(msg, &sn->low);
-    return valid;
+    return readInt32(msg, &sn->high) && readUInt32(msg, &sn->low);
 }
 
 SequenceNumberSet_t CDRMessage::readSequenceNumberSet(
         CDRMessage_t* msg)
 {
-    bool valid = true;
-
     SequenceNumber_t seqNum;
-    valid &= CDRMessage::readSequenceNumber(msg, &seqNum);
+    bool valid = CDRMessage::readSequenceNumber(msg, &seqNum);
     uint32_t numBits = 0;
-    valid &= CDRMessage::readUInt32(msg, &numBits);
-    valid &= (numBits <= 256u);
-    valid &= (seqNum.high >= 0);
+    valid = valid && CDRMessage::readUInt32(msg, &numBits);
+    valid = valid && (numBits <= 256u);
+    valid = valid && (seqNum.high >= 0);
     if (valid && std::numeric_limits<int32_t>::max() == seqNum.high)
     {
         numBits = (std::min)(numBits, (std::numeric_limits<uint32_t>::max)() - seqNum.low);
@@ -278,7 +233,7 @@ SequenceNumberSet_t CDRMessage::readSequenceNumberSet(
     uint32_t bitmap[8];
     for (uint32_t i = 0; valid && (i < n_longs); ++i)
     {
-        valid &= CDRMessage::readUInt32(msg, &bitmap[i]);
+        valid = CDRMessage::readUInt32(msg, &bitmap[i]);
     }
 
     if (valid)
@@ -295,19 +250,17 @@ bool CDRMessage::readFragmentNumberSet(
         CDRMessage_t* msg,
         FragmentNumberSet_t* fns)
 {
-    bool valid = true;
-
     FragmentNumber_t base = 0ul;
-    valid &= CDRMessage::readUInt32(msg, &base);
+    bool valid = CDRMessage::readUInt32(msg, &base);
     uint32_t numBits = 0;
-    valid &= CDRMessage::readUInt32(msg, &numBits);
-    valid &= (numBits <= 256u);
+    valid = valid && CDRMessage::readUInt32(msg, &numBits);
+    valid = valid && (numBits <= 256u);
 
     uint32_t n_longs = (numBits + 31u) / 32u;
     uint32_t bitmap[8];
     for (uint32_t i = 0; valid && (i < n_longs); ++i)
     {
-        valid &= CDRMessage::readUInt32(msg, &bitmap[i]);
+        valid = CDRMessage::readUInt32(msg, &bitmap[i]);
     }
 
     if (valid)
@@ -323,26 +276,112 @@ bool CDRMessage::readTimestamp(
         CDRMessage_t* msg,
         rtps::Time_t* ts)
 {
-    bool valid = true;
-    valid &= CDRMessage::readInt32(msg, &ts->seconds());
-    uint32_t frac(0);
-    valid &= CDRMessage::readUInt32(msg, &frac);
-    ts->fraction(frac);
+    int32_t sec = 0;
+    uint32_t frac = 0;
+    bool valid = CDRMessage::readInt32(msg, &sec);
+    valid = valid && CDRMessage::readUInt32(msg, &frac);
+    if (valid)
+    {
+        ts->seconds(sec);
+        ts->fraction(frac);
+    }
     return valid;
 }
 
-bool CDRMessage::readLocator(
+bool CDRMessage::read_locator(
         CDRMessage_t* msg,
         Locator_t* loc)
 {
-    if (msg->pos + 24 > msg->length)
+    if (!check_available_data(msg, PARAMETER_LOCATOR_LENGTH))
     {
         return false;
     }
 
     bool valid = readInt32(msg, &loc->kind);
-    valid &= readUInt32(msg, &loc->port);
-    valid &= readData(msg, loc->address, 16);
+    valid = valid && readUInt32(msg, &loc->port);
+    valid = valid && readData(msg, loc->address, 16);
+
+    return valid;
+}
+
+bool CDRMessage::read_locator_list(
+        CDRMessage_t* msg,
+        LocatorList* locator_list)
+{
+    assert(locator_list != nullptr);
+
+    // Read and check number of locators
+    uint32_t locator_list_size = 0;
+    bool valid = rtps::CDRMessage::readUInt32(msg, &locator_list_size);
+    valid = valid && check_available_data(msg, locator_list_size, PARAMETER_LOCATOR_LENGTH);
+    if (!valid)
+    {
+        return false;
+    }
+
+    // Read locators
+    locator_list->reserve(locator_list_size);
+    for (uint32_t i = 0; valid && (i < locator_list_size); ++i)
+    {
+        rtps::Locator_t locator;
+        valid = rtps::CDRMessage::read_locator(msg, &locator);
+        if (valid)
+        {
+            locator_list->push_back(locator);
+        }
+    }
+
+    return valid;
+}
+
+bool CDRMessage::read_external_locator(
+        CDRMessage_t* msg,
+        LocatorWithMask* loc,
+        uint8_t* externality,
+        uint8_t* cost)
+{
+    bool ret = false;
+
+    if (check_available_data(msg, PARAMETER_LOCATOR_LENGTH + 4))
+    {
+        ret = read_locator(msg, loc);
+        ret = ret && readOctet(msg, externality);
+        ret = ret && readOctet(msg, cost);
+        uint8_t mask = 0;
+        ret = ret && readOctet(msg, &mask);
+        if (ret)
+        {
+            loc->mask(mask);
+        }
+        msg->pos += 1; // padding
+    }
+
+    return ret;
+}
+
+bool CDRMessage::read_external_locator_list(
+        CDRMessage_t* msg,
+        ExternalLocators* external_locators)
+{
+    assert(external_locators != nullptr);
+
+    // Read and check number of external locators
+    uint32_t external_locators_size = 0;
+    bool valid = rtps::CDRMessage::readUInt32(msg, &external_locators_size);
+    valid = valid && check_available_data(msg, external_locators_size, PARAMETER_LOCATOR_LENGTH + 4);
+
+    // Read external locators
+    for (uint32_t i = 0; valid && (i < external_locators_size); ++i)
+    {
+        rtps::Locator_t locator;
+        rtps::LocatorWithMask locator_with_mask;
+        uint8_t externality = 0, cost = 0;
+        valid = rtps::CDRMessage::read_external_locator(msg, &locator_with_mask, &externality, &cost);
+        if (valid)
+        {
+            (*external_locators)[externality][cost].push_back(locator_with_mask);
+        }
+    }
 
     return valid;
 }
@@ -351,53 +390,21 @@ bool CDRMessage::readInt16(
         CDRMessage_t* msg,
         int16_t* i16)
 {
-    if (msg->pos + 2 > msg->length)
-    {
-        return false;
-    }
-    octet* o = (octet*)i16;
-    if (msg->msg_endian == DEFAULT_ENDIAN)
-    {
-        *o = msg->buffer[msg->pos];
-        *(o + 1) = msg->buffer[msg->pos + 1];
-    }
-    else
-    {
-        *o = msg->buffer[msg->pos + 1];
-        *(o + 1) = msg->buffer[msg->pos];
-    }
-    msg->pos += 2;
-    return true;
+    return read_with_endian(msg, i16, sizeof(int16_t));
 }
 
 bool CDRMessage::readUInt16(
         CDRMessage_t* msg,
         uint16_t* i16)
 {
-    if (msg->pos + 2 > msg->length)
-    {
-        return false;
-    }
-    octet* o = (octet*)i16;
-    if (msg->msg_endian == DEFAULT_ENDIAN)
-    {
-        *o = msg->buffer[msg->pos];
-        *(o + 1) = msg->buffer[msg->pos + 1];
-    }
-    else
-    {
-        *o = msg->buffer[msg->pos + 1];
-        *(o + 1) = msg->buffer[msg->pos];
-    }
-    msg->pos += 2;
-    return true;
+    return read_with_endian(msg, i16, sizeof(uint16_t));
 }
 
 bool CDRMessage::readOctet(
         CDRMessage_t* msg,
         octet* o)
 {
-    if (msg->pos + 1 > msg->length)
+    if (!check_available_data(msg, 1))
     {
         return false;
     }
@@ -410,30 +417,36 @@ bool CDRMessage::readOctetVector(
         CDRMessage_t* msg,
         std::vector<octet>* ocvec)
 {
-    if (msg->pos + 4 > msg->length)
+    // Read and check size
+    uint32_t vecsize;
+    bool valid = CDRMessage::readUInt32(msg, &vecsize);
+    valid = valid && check_available_data(msg, vecsize);
+    if (!valid)
     {
         return false;
     }
-    uint32_t vecsize;
-    bool valid = CDRMessage::readUInt32(msg, &vecsize);
+
+    // Read vector data
     ocvec->resize(vecsize);
-    valid &= CDRMessage::readData(msg, ocvec->data(), vecsize);
+    valid = CDRMessage::readData(msg, ocvec->data(), vecsize);
     msg->pos = (msg->pos + 3u) & ~3u;
     return valid;
 }
 
-bool CDRMessage::readString(
+bool CDRMessage::read_string(
         CDRMessage_t* msg,
         std::string* stri)
 {
+    // Read and check size
     uint32_t str_size = 1;
-    bool valid = true;
-    valid &= CDRMessage::readUInt32(msg, &str_size);
-    if (msg->pos + str_size > msg->length)
+    bool valid = CDRMessage::readUInt32(msg, &str_size);
+    valid = valid && check_available_data(msg, str_size);
+    if (!valid)
     {
         return false;
     }
 
+    // Read string data
     stri->clear();
     if (str_size > 1)
     {
@@ -449,18 +462,21 @@ bool CDRMessage::readString(
     return valid;
 }
 
-bool CDRMessage::readString(
+bool CDRMessage::read_string(
         CDRMessage_t* msg,
         fastcdr::string_255* stri)
 {
+    // Read and check size
     uint32_t str_size = 1;
-    bool valid = true;
-    valid &= CDRMessage::readUInt32(msg, &str_size);
-    if (msg->pos + str_size > msg->length)
+    bool valid = CDRMessage::readUInt32(msg, &str_size);
+    valid = valid && (str_size <= (fastcdr::string_255::max_size + 1));
+    valid = valid && check_available_data(msg, str_size);
+    if (!valid)
     {
         return false;
     }
 
+    // Read string data
     *stri = "";
     if (str_size > 1)
     {
@@ -485,6 +501,11 @@ void CDRMessage::copyToBuffer(
         const uint32_t length,
         bool reverse)
 {
+    if (length == 0)
+    {
+        return;
+    }
+
     if (reverse)
     {
         for (uint32_t i = 0; i < length; i++)
@@ -588,13 +609,17 @@ bool CDRMessage::addOctetVector(
         const std::vector<octet>* ocvec,
         bool add_final_padding)
 {
-    // TODO Calculate without padding
-    auto final_size = msg->pos + ocvec->size();
+    auto final_size = msg->pos + 4 + ocvec->size();
     if (add_final_padding)
     {
-        final_size += 4;
+        size_t rest = ocvec->size() % 4;
+        if (rest != 0)
+        {
+            rest = 4 - rest; // How many you have to add
+            final_size += rest;
+        }
     }
-    if (final_size >= msg->max_size)
+    if (final_size > msg->max_size)
     {
         return false;
     }
@@ -603,13 +628,11 @@ bool CDRMessage::addOctetVector(
 
     if (add_final_padding)
     {
-        int rest = ocvec->size() % 4;
-        if (rest != 0)
+        size_t rest = final_size - msg->pos;
+        if (rest > 0)
         {
-            rest = 4 - rest; //how many you have to add
-
             octet oc = '\0';
-            for (int i = 0; i < rest; i++)
+            for (size_t i = 0; i < rest; i++)
             {
                 valid &= CDRMessage::addOctet(msg, oc);
             }
@@ -623,7 +646,7 @@ bool CDRMessage::addEntityId(
         CDRMessage_t* msg,
         const EntityId_t* ID)
 {
-    if (msg->pos + 4 >= msg->max_size)
+    if (msg->pos + 4 > msg->max_size)
     {
         return false;
     }
@@ -706,7 +729,7 @@ bool CDRMessage::addFragmentNumberSet(
     return true;
 }
 
-bool CDRMessage::addLocator(
+bool CDRMessage::add_locator(
         CDRMessage_t* msg,
         const Locator_t& loc)
 {
@@ -714,6 +737,68 @@ bool CDRMessage::addLocator(
     addUInt32(msg, loc.port);
     addData(msg, loc.address, 16);
     return true;
+}
+
+bool CDRMessage::add_locator_list(
+        CDRMessage_t* msg,
+        const LocatorList& locator_list)
+{
+    bool valid = rtps::CDRMessage::addUInt32(msg, (uint32_t)locator_list.size());
+    for (const auto& locator : locator_list)
+    {
+        valid &= rtps::CDRMessage::add_locator(msg, locator);
+    }
+    return valid;
+}
+
+bool CDRMessage::add_external_locator(
+        CDRMessage_t* msg,
+        const LocatorWithMask& loc,
+        const uint8_t& externality,
+        const uint8_t& cost)
+{
+    bool ret = false;
+
+    if (msg->pos + 28 <= msg->max_size)
+    {
+        ret = add_locator(msg, loc);
+        ret &= addOctet(msg, externality);
+        ret &= addOctet(msg, cost);
+        ret &= addOctet(msg, loc.mask());
+        ret &= addOctet(msg, 0); // Padding
+    }
+
+    return ret;
+}
+
+bool CDRMessage::add_external_locator_list(
+        CDRMessage_t* msg,
+        const ExternalLocators& external_locators)
+{
+    uint32_t external_locator_list_size = 0;
+    for (const auto& externality__cost_locator_list : external_locators)
+    {
+        for (const auto& cost__locator_list : externality__cost_locator_list.second)
+        {
+            external_locator_list_size += static_cast<uint32_t>(cost__locator_list.second.size());
+        }
+    }
+    bool valid =
+            rtps::CDRMessage::addUInt32(msg, external_locator_list_size);
+    for (const auto& externality__cost_locator_list : external_locators)
+    {
+        for (const auto& cost__locator_list : externality__cost_locator_list.second)
+        {
+            for (const auto& locator : cost__locator_list.second)
+            {
+                valid &= rtps::CDRMessage::add_external_locator(msg, locator,
+                                externality__cost_locator_list.first,
+                                cost__locator_list.first);
+            }
+        }
+    }
+
+    return valid;
 }
 
 bool CDRMessage::add_string(
@@ -724,7 +809,7 @@ bool CDRMessage::add_string(
     bool valid = CDRMessage::addUInt32(msg, str_siz);
     valid &= CDRMessage::addData(msg, (unsigned char*) in_str, str_siz);
     octet oc = '\0';
-    for (; str_siz& 3; ++str_siz)
+    for (; str_siz & 3; ++str_siz)
     {
         valid &= CDRMessage::addOctet(msg, oc);
     }
@@ -772,11 +857,11 @@ bool CDRMessage::readProperty(
 {
     assert(msg);
 
-    if (!CDRMessage::readString(msg, &property.name()))
+    if (!CDRMessage::read_string(msg, &property.name()))
     {
         return false;
     }
-    if (!CDRMessage::readString(msg, &property.value()))
+    if (!CDRMessage::read_string(msg, &property.value()))
     {
         return false;
     }
@@ -812,7 +897,7 @@ bool CDRMessage::readBinaryProperty(
 {
     assert(msg);
 
-    if (!CDRMessage::readString(msg, &binary_property.name()))
+    if (!CDRMessage::read_string(msg, &binary_property.name()))
     {
         return false;
     }
@@ -862,8 +947,7 @@ bool CDRMessage::addPropertySeq(
 
 bool CDRMessage::readPropertySeq(
         CDRMessage_t* msg,
-        PropertySeq& properties,
-        const uint32_t parameter_length)
+        PropertySeq& properties)
 {
     assert(msg);
 
@@ -875,7 +959,7 @@ bool CDRMessage::readPropertySeq(
 
     // Length should be at least 16 times the number of elements, since each property contains
     // 2 empty strings, each with 4 bytes for its length + at least 4 bytes of data (single NUL character + padding)
-    if (16 * length > parameter_length)
+    if (!check_available_data(msg, length, 16))
     {
         return false;
     }
@@ -972,8 +1056,7 @@ bool CDRMessage::addBinaryPropertySeq(
 
 bool CDRMessage::readBinaryPropertySeq(
         CDRMessage_t* msg,
-        BinaryPropertySeq& binary_properties,
-        const uint32_t parameter_length)
+        BinaryPropertySeq& binary_properties)
 {
     assert(msg);
 
@@ -986,7 +1069,7 @@ bool CDRMessage::readBinaryPropertySeq(
     // Length should be at least 12 times the number of elements, since each each property contains at least
     // 1 empty string with 4 bytes for its length + at least 4 bytes of data (single NUL character + padding) and
     // 1 empty byte sequence with 4 bytes for its length
-    if (12 * length > parameter_length)
+    if (!check_available_data(msg, length, 12))
     {
         return false;
     }
@@ -1025,20 +1108,19 @@ bool CDRMessage::addDataHolder(
 
 bool CDRMessage::readDataHolder(
         CDRMessage_t* msg,
-        DataHolder& data_holder,
-        const uint32_t parameter_length)
+        DataHolder& data_holder)
 {
     assert(msg);
 
-    if (!CDRMessage::readString(msg, &data_holder.class_id()))
+    if (!CDRMessage::read_string(msg, &data_holder.class_id()))
     {
         return false;
     }
-    if (!CDRMessage::readPropertySeq(msg, data_holder.properties(), parameter_length))
+    if (!CDRMessage::readPropertySeq(msg, data_holder.properties()))
     {
         return false;
     }
-    if (!CDRMessage::readBinaryPropertySeq(msg, data_holder.binary_properties(), parameter_length))
+    if (!CDRMessage::readBinaryPropertySeq(msg, data_holder.binary_properties()))
     {
         return false;
     }
@@ -1086,7 +1168,7 @@ bool CDRMessage::readDataHolderSeq(
     // Length should be at least 16 times the number of elements, since each DataHolder contains at least
     // 1 empty string with 4 bytes for its length + at least 4 bytes of data (single NUL character + padding) and
     // 2 empty property sequences, each with 4 bytes for its length
-    if (msg->pos + 16 * length > msg->length)
+    if (!check_available_data(msg, length, 16))
     {
         return false;
     }
@@ -1095,9 +1177,7 @@ bool CDRMessage::readDataHolderSeq(
     bool returnedValue = true;
     for (uint32_t i = 0; returnedValue && i < length; ++i)
     {
-        //! The parameter length should be the remaining length of the message
-        uint32_t remaining_length = msg->length - msg->pos;
-        returnedValue = CDRMessage::readDataHolder(msg, data_holders.at(i), remaining_length);
+        returnedValue = CDRMessage::readDataHolder(msg, data_holders.at(i));
     }
 
     return returnedValue;
@@ -1235,7 +1315,7 @@ bool CDRMessage::readParticipantGenericMessage(
     {
         return false;
     }
-    if (!CDRMessage::readString(msg, &message.message_class_id()))
+    if (!CDRMessage::read_string(msg, &message.message_class_id()))
     {
         return false;
     }
@@ -1247,12 +1327,59 @@ bool CDRMessage::readParticipantGenericMessage(
     return true;
 }
 
+bool CDRMessage::read_resource_limited_container_config(
+        CDRMessage_t* msg,
+        ResourceLimitedContainerConfig& config)
+{
+    uint64_t deser_val = 0;
+
+    bool ret = CDRMessage::readUInt64(msg, &deser_val);
+    clamp_uint64_to_size_t(deser_val, config.initial);
+
+    ret = ret && CDRMessage::readUInt64(msg, &deser_val);
+    clamp_uint64_to_size_t(deser_val, config.maximum);
+
+    ret = ret && CDRMessage::readUInt64(msg, &deser_val);
+    clamp_uint64_to_size_t(deser_val, config.increment);
+
+    return ret;
+}
+
+bool CDRMessage::add_resource_limited_container_config(
+        CDRMessage_t* msg,
+        const ResourceLimitedContainerConfig& config)
+{
+    bool ret = rtps::CDRMessage::addUInt64(msg, config.initial);
+    ret &= rtps::CDRMessage::addUInt64(msg, config.maximum);
+    ret &= rtps::CDRMessage::addUInt64(msg, config.increment);
+
+    return ret;
+}
+
+bool CDRMessage::read_duration_t(
+        CDRMessage_t* msg,
+        dds::Duration_t& duration)
+{
+    bool valid = CDRMessage::readInt32(msg, &duration.seconds);
+    valid = valid && CDRMessage::readUInt32(msg, &duration.nanosec);
+    return valid;
+}
+
+bool CDRMessage::add_duration_t(
+        CDRMessage_t* msg,
+        const dds::Duration_t& duration)
+{
+    bool ret = rtps::CDRMessage::addInt32(msg, duration.seconds);
+    ret &= rtps::CDRMessage::addUInt32(msg, duration.nanosec);
+    return ret;
+}
+
 bool CDRMessage::skip(
         CDRMessage_t* msg,
         uint32_t length)
 {
     // Validate input
-    bool ret = (msg != nullptr) && (msg->pos + length <= msg->length);
+    bool ret = (msg != nullptr) && check_available_data(msg, length);
     if (ret)
     {
         // Advance index the number of specified bytes

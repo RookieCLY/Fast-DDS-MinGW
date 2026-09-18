@@ -286,6 +286,13 @@ public:
         return qos_;
     }
 
+    ReturnCode_t get_qos(
+            DataWriterQos& qos) const
+    {
+        qos = qos_;
+        return RETCODE_OK;
+    }
+
     Topic* get_topic() const
     {
         return topic_;
@@ -440,6 +447,23 @@ public:
             std::vector<InstanceHandle_t*>&) const
     {
         return RETCODE_ERROR;
+    }
+
+    ReturnCode_t set_sample_prefilter(
+            std::shared_ptr<IContentFilter>)
+    {
+        return RETCODE_OK;
+    }
+
+    ReturnCode_t set_related_datareader(
+            const DataReader* /*related_reader*/)
+    {
+        return RETCODE_OK;
+    }
+
+    void set_type_support_context(
+            const std::shared_ptr<eprosima::fastdds::dds::TopicDataType::Context>&)
+    {
     }
 
     //! Pointer to the associated Data Writer.

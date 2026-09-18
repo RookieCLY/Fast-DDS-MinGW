@@ -21,6 +21,7 @@
 #include <fastdds/rtps/RTPSDomain.hpp>
 
 #include "BlackboxTests.hpp"
+#include "PubSubParticipant.hpp"
 #include "PubSubReader.hpp"
 #include "PubSubWriter.hpp"
 
@@ -241,8 +242,8 @@ TEST(DSEasyMode, easy_discovery_mode_env_discovery_info)
 
     for (auto& writer : writers)
     {
-        // Writers shall discover SERVER participant only
-        ASSERT_LE(writer->get_participants_matched(), 1u);
+        // Writers shall discover all the other participants (CLIENT)
+        ASSERT_LE(writer->get_participants_matched(), num_writers + 1u);
     }
 
     // Stop server
@@ -359,5 +360,199 @@ TEST(DSEasyMode, easy_discovery_mode_env_inconsistent_ip)
 
     // Stop servers
     stop_background_servers();
+#endif // _WIN32
+}
+
+/**
+ * Check that the environment variable ROS2_EASY_MODE is ignored if
+ * it does not have a valid IPv4 format.
+ */
+TEST(DSEasyMode, easy_discovery_mode_env_invalid)
+{
+#ifndef _WIN32 // The feature is not supported on Windows yet
+
+    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    PubSubReader<HelloWorldPubSubType> reader(TEST_TOPIC_NAME);
+
+    // Set ROS2_EASY_MODE to an invalid string value
+    set_easy_discovery_mode_env("Foo");
+
+    std::atomic<bool> writer_background_ds_discovered(false);
+    std::atomic<bool> reader_background_ds_discovered(false);
+
+    writer.set_on_discovery_function(
+        [&writer_background_ds_discovered](
+            const eprosima::fastdds::rtps::ParticipantBuiltinTopicData& data,
+            eprosima::fastdds::rtps::ParticipantDiscoveryStatus)
+        {
+            if (data.participant_name == "DiscoveryServerAuto")
+            {
+                writer_background_ds_discovered.store(true);
+            }
+            return true;
+        });
+    writer.init();
+
+    reader.set_on_discovery_function(
+        [&reader_background_ds_discovered](const eprosima::fastdds::rtps::ParticipantBuiltinTopicData& data,
+        eprosima::fastdds::rtps::ParticipantDiscoveryStatus)
+        {
+            if (data.participant_name == "DiscoveryServerAuto")
+            {
+                reader_background_ds_discovered.store(true);
+            }
+            return true;
+        });
+    reader.init();
+
+    ASSERT_TRUE(writer.isInitialized());
+    ASSERT_TRUE(reader.isInitialized());
+
+    // Wait for endpoint discovery first
+    writer.wait_discovery();
+    reader.wait_discovery();
+
+    // Check that no Background DS was discovered,
+    // only the other reader or writer
+    ASSERT_GE(writer.get_participants_matched(), 1u);
+    ASSERT_GE(reader.get_participants_matched(), 1u);
+    ASSERT_FALSE(writer_background_ds_discovered.load());
+    ASSERT_FALSE(reader_background_ds_discovered.load());
+#endif // _WIN32
+}
+
+/**
+ * Test that Easy Mode launches correctly when setting it with code
+ * using WireProtocolConfigQos.
+ */
+TEST(DSEasyMode, easy_mode_from_qos_valid)
+{
+#ifndef _WIN32 // The feature is not supported on Windows yet
+
+    // Create one participant for each endpoint
+    PubSubParticipant<HelloWorldPubSubType> participant_writer(1u, 0u, 1u, 0u);
+    PubSubParticipant<HelloWorldPubSubType> participant_reader(0u, 1u, 0u, 1u);
+
+    // Setting Easy Mode manually using WireProtocolConfigQos
+    eprosima::fastdds::dds::WireProtocolConfigQos wire_protocol;
+    wire_protocol.easy_mode("127.0.0.1");
+    participant_writer.wire_protocol(wire_protocol);
+    participant_writer.pub_topic_name(TEST_TOPIC_NAME);
+    participant_reader.wire_protocol(wire_protocol);
+    participant_reader.sub_topic_name(TEST_TOPIC_NAME);
+
+    std::atomic<bool> participant_writer_background_ds_discovered(false);
+    std::atomic<bool> participant_reader_background_ds_discovered(false);
+
+    participant_writer.set_on_discovery_function(
+        [&participant_writer_background_ds_discovered](
+            const eprosima::fastdds::rtps::ParticipantBuiltinTopicData& data)
+        {
+            if (data.participant_name == "DiscoveryServerAuto")
+            {
+                participant_writer_background_ds_discovered.store(true);
+            }
+            return true;
+        });
+
+    participant_reader.set_on_discovery_function(
+        [&participant_reader_background_ds_discovered](
+            const eprosima::fastdds::rtps::ParticipantBuiltinTopicData& data)
+        {
+            if (data.participant_name == "DiscoveryServerAuto")
+            {
+                participant_reader_background_ds_discovered.store(true);
+            }
+            return true;
+        });
+
+    ASSERT_TRUE(participant_writer.init_participant());
+    ASSERT_TRUE(participant_writer.init_publisher(0));
+    ASSERT_TRUE(participant_reader.init_participant());
+    ASSERT_TRUE(participant_reader.init_subscriber(0));
+
+    // Two DomainParticipants should be discovered:
+    // Background DS and the other reader/writer
+    participant_writer.wait_discovery(std::chrono::seconds::zero(), 2);
+    participant_reader.wait_discovery(std::chrono::seconds::zero(), 2);
+
+    ASSERT_TRUE(participant_writer_background_ds_discovered.load());
+    ASSERT_TRUE(participant_reader_background_ds_discovered.load());
+
+    participant_writer.pub_wait_discovery();
+    participant_reader.sub_wait_discovery();
+
+    size_t num_samples = 10;
+    auto data = default_helloworld_data_generator(num_samples);
+
+    for (auto& sample : data)
+    {
+        ASSERT_TRUE(participant_writer.send_sample(sample, 0));
+    }
+
+    participant_reader.sub_wait_data_received(num_samples);
+
+    // Stop server
+    stop_background_servers();
+#endif // _WIN32
+}
+
+/**
+ * Check that the configuration is ignored when set with invalid values using `WireProtocolConfigQos`.
+ */
+TEST(DSEasyMode, easy_mode_from_qos_invalid)
+{
+#ifndef _WIN32 // The feature is not supported on Windows yet
+
+    // Create one participant for each endpoint
+    PubSubParticipant<HelloWorldPubSubType> participant_writer(1u, 0u, 1u, 0u);
+    PubSubParticipant<HelloWorldPubSubType> participant_reader(0u, 1u, 0u, 1u);
+
+    // Trying to set Easy Mode manually using a non-valid IPv4 address
+    eprosima::fastdds::dds::WireProtocolConfigQos wire_protocol;
+    wire_protocol.easy_mode("Foo");
+    participant_writer.wire_protocol(wire_protocol);
+    participant_writer.pub_topic_name(TEST_TOPIC_NAME);
+    participant_reader.wire_protocol(wire_protocol);
+    participant_reader.sub_topic_name(TEST_TOPIC_NAME);
+
+    std::atomic<bool> participant_writer_background_ds_discovered(false);
+    std::atomic<bool> participant_reader_background_ds_discovered(false);
+
+    participant_writer.set_on_discovery_function(
+        [&participant_writer_background_ds_discovered](
+            const eprosima::fastdds::rtps::ParticipantBuiltinTopicData& data)
+        {
+            if (data.participant_name == "DiscoveryServerAuto")
+            {
+                participant_writer_background_ds_discovered.store(true);
+            }
+            return true;
+        });
+
+    participant_reader.set_on_discovery_function(
+        [&participant_reader_background_ds_discovered](
+            const eprosima::fastdds::rtps::ParticipantBuiltinTopicData& data)
+        {
+            if (data.participant_name == "DiscoveryServerAuto")
+            {
+                participant_reader_background_ds_discovered.store(true);
+            }
+            return true;
+        });
+
+    ASSERT_TRUE(participant_writer.init_participant());
+    ASSERT_TRUE(participant_reader.init_participant());
+
+    // Only one DomainParticipant should be discovered:
+    // Participant associated to the other reader/writer
+    // No Background DS Participant should be discovered
+    std::chrono::seconds timeout(5);
+    // Timeout should be reached as no Background DS is expected
+    participant_writer.wait_discovery(timeout, 2);
+    participant_reader.wait_discovery(timeout, 2);
+    ASSERT_FALSE(participant_writer_background_ds_discovered.load());
+    ASSERT_FALSE(participant_reader_background_ds_discovered.load());
+
 #endif // _WIN32
 }

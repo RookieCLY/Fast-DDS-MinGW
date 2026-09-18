@@ -59,6 +59,7 @@ public:
             payload.data = data.data;
             payload.length = data.length;
             payload.max_size = data.length;
+            payload.is_serialized_key = data.is_serialized_key;
             payload.payload_owner = this;
             return true;
         }
@@ -97,7 +98,7 @@ public:
         return DataSharingPayloadPool::release_payload(payload);
     }
 
-    template <typename T>
+    template<typename T>
     bool init_shared_segment(
             const GUID_t& writer_guid,
             const std::string& shared_dir)
@@ -210,9 +211,10 @@ public:
                 continue;
             }
 
-            if (last_sn_ != c_SequenceNumber_Unknown && last_sn_ >= cache_change.sequenceNumber)
+            if (last_sn_ != c_SequenceNumber_Unknown && last_sn_ > cache_change.sequenceNumber)
             {
                 // Sequence number went backwards, it was most probably overriden.
+                advance(next_payload_);
                 continue;
             }
 
@@ -254,6 +256,7 @@ public:
         if (check == c_SequenceNumber_Unknown || check != cache_change.sequenceNumber)
         {
             // data override while processing
+            cache_change.serializedPayload.data = nullptr;
             return false;
         }
 

@@ -29,11 +29,15 @@
 #include <fastdds/dds/domain/DomainParticipantFactory.hpp>
 #include <fastdds/dds/domain/DomainParticipantListener.hpp>
 #include <fastdds/dds/domain/qos/DomainParticipantQos.hpp>
+#include <fastdds/rtps/attributes/PropertyPolicy.hpp>
 #include <fastdds/rtps/builtin/data/ParticipantBuiltinTopicData.hpp>
 #include <fastdds/rtps/common/CDRMessage_t.hpp>
 #include <fastdds/rtps/common/Locator.hpp>
+#include <fastdds/rtps/common/Property.hpp>
 #include <fastdds/rtps/participant/ParticipantDiscoveryInfo.hpp>
 #include <fastdds/rtps/transport/test_UDPv4TransportDescriptor.hpp>
+#include <fastdds/utils/IPFinder.hpp>
+
 #include <gtest/gtest.h>
 
 #include "../utils/filter_helpers.hpp"
@@ -356,71 +360,6 @@ TEST(DDSDiscovery, ServersConnectionTCP)
     server_3.wait_discovery(std::chrono::seconds::zero(), 2, true); // Knows server1 and server2
 }
 
-/**
- * This test checks the addition of network interfaces at run-time.
- *
- * After launching the reader with the network interfaces enabled,
- * the writer is launched with the transport simulating that there
- * are no interfaces.
- * No participant discovery occurs, nor is communication established.
- *
- * In a second step, the flag to simulate no interfaces is disabled and
- * DomainParticipant::set_qos() called to add the "new" interfaces.
- * Discovery is succesful and communication is established.
- */
-TEST(DDSDiscovery, DDSNetworkInterfaceChangesAtRunTime)
-{
-    using namespace eprosima::fastdds::rtps;
-
-    PubSubWriter<HelloWorldPubSubType> datawriter(TEST_TOPIC_NAME);
-    PubSubReader<HelloWorldPubSubType> datareader(TEST_TOPIC_NAME);
-
-    // datareader is initialized with all the network interfaces
-    datareader.durability_kind(eprosima::fastdds::dds::TRANSIENT_LOCAL_DURABILITY_QOS).history_depth(100).
-            reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS).init();
-    ASSERT_TRUE(datareader.isInitialized());
-
-    // datawriter: launch without interfaces
-    auto test_transport = std::make_shared<test_UDPv4TransportDescriptor>();
-    test_transport->test_transport_options->simulate_no_interfaces = true;
-    datawriter.disable_builtin_transport().add_user_transport_to_pparams(test_transport).history_depth(100).init();
-    ASSERT_TRUE(datawriter.isInitialized());
-
-    // no discovery
-    datawriter.wait_discovery(std::chrono::seconds(3));
-    datareader.wait_discovery(std::chrono::seconds(3));
-    EXPECT_EQ(datawriter.get_matched(), 0u);
-    EXPECT_EQ(datareader.get_matched(), 0u);
-
-    // send data
-    auto complete_data = default_helloworld_data_generator();
-    size_t samples = complete_data.size();
-
-    datareader.startReception(complete_data);
-
-    datawriter.send(complete_data);
-    EXPECT_TRUE(complete_data.empty());
-
-    // no data received
-    EXPECT_EQ(datareader.block_for_all(std::chrono::seconds(3)), 0u);
-
-    // enable interfaces
-    test_transport->test_transport_options->simulate_no_interfaces = false;
-    datawriter.participant_set_qos();
-
-    // Wait for discovery
-    datawriter.wait_discovery(std::chrono::seconds(3));
-    datareader.wait_discovery(std::chrono::seconds(3));
-    ASSERT_EQ(datawriter.get_matched(), 1u);
-    ASSERT_EQ(datareader.get_matched(), 1u);
-
-    // data received
-    EXPECT_EQ(datareader.block_for_all(std::chrono::seconds(3)), samples);
-
-    datareader.destroy();
-    datawriter.destroy();
-}
-
 /*
  * This tests checks that DataReader::get_subscription_matched_status() and
  * DataWriter::get_publication_matched_status() return the correct last_publication_handle
@@ -544,6 +483,251 @@ TEST(DDSDiscovery, UpdateMatchedStatus)
     datareader_2.destroy();
     datawriter_1.destroy();
     datawriter_2.destroy();
+}
+
+/*
+ * This is a regression test for redmine issue 21355.
+ *
+ * In order to check that the on_publication_matched() and on_subscription_matched() callbacks are always called with
+ * either +1 or -1 as the current_count_change, this test creates and destroys multiple DataReaders and DataWriters in
+ * different threads, with a listener that counts the number of times on_publication_matched() and
+ * on_subscription_matched() are called with current_count_change different than 1 or -1.
+ *
+ * The test fails if any of the calls to on_publication_matched() or on_subscription_matched() is made with a
+ * current_count_change different than 1 or -1.
+ */
+TEST(DDSDiscovery, MatchedCallbackListenerMultithread)
+{
+    constexpr size_t NUM_THREADS = 25;
+
+    struct TestListener
+        : public eprosima::fastdds::dds::DataReaderListener
+        , public eprosima::fastdds::dds::DataWriterListener
+    {
+        std::atomic<uint32_t> reader_other_calls{ 0 };
+        std::atomic<uint32_t> writer_other_calls{ 0 };
+
+        void on_publication_matched(
+                eprosima::fastdds::dds::DataWriter*,
+                const eprosima::fastdds::dds::PublicationMatchedStatus& info) override
+        {
+            if ((info.current_count_change != 1) && (info.current_count_change != -1))
+            {
+                ++writer_other_calls;
+            }
+        }
+
+        void on_subscription_matched(
+                eprosima::fastdds::dds::DataReader*,
+                const eprosima::fastdds::dds::SubscriptionMatchedStatus& info) override
+        {
+            if ((info.current_count_change != 1) && (info.current_count_change != -1))
+            {
+                ++reader_other_calls;
+            }
+        }
+
+    };
+
+    std::ostringstream t;
+    t << TEST_TOPIC_NAME << "_" << asio::ip::host_name() << "_" << GET_PID();
+    std::string topic_name = t.str();
+    TestListener listener;
+    eprosima::fastdds::dds::TypeSupport type(new HelloWorldPubSubType());
+
+    auto create_entities = [&listener, &topic_name, &type]()
+            {
+                using namespace eprosima::fastdds::dds;
+
+                uint32_t domain_id = static_cast<uint32_t>(GET_PID()) % 100;
+                auto factory = DomainParticipantFactory::get_shared_instance();
+                DomainParticipantQos participant_qos;
+                factory->get_default_participant_qos(participant_qos);
+                participant_qos.setup_transports(eprosima::fastdds::rtps::BuiltinTransports::UDPv4);
+                participant_qos.wire_protocol().builtin.discovery_config.leaseDuration.seconds = 0;
+                participant_qos.wire_protocol().builtin.discovery_config.leaseDuration.nanosec = 100000000;
+                participant_qos.wire_protocol().builtin.discovery_config.leaseDuration_announcementperiod.seconds = 0;
+                participant_qos.wire_protocol().builtin.discovery_config.leaseDuration_announcementperiod.nanosec =
+                        50000000;
+
+                auto participant = factory->create_participant(domain_id, participant_qos);
+                ASSERT_NE(participant, nullptr);
+
+                type.register_type(participant);
+                auto topic = participant->create_topic(topic_name, type.get_type_name(), TOPIC_QOS_DEFAULT);
+                ASSERT_NE(topic, nullptr);
+
+                auto publisher = participant->create_publisher(PUBLISHER_QOS_DEFAULT);
+                ASSERT_NE(publisher, nullptr);
+
+                DataWriterQos datawriter_qos;
+                publisher->get_default_datawriter_qos(datawriter_qos);
+                datawriter_qos.data_sharing().off();
+                auto datawriter = publisher->create_datawriter(topic, datawriter_qos, &listener);
+                ASSERT_NE(datawriter, nullptr);
+
+                auto subscriber = participant->create_subscriber(SUBSCRIBER_QOS_DEFAULT);
+                ASSERT_NE(subscriber, nullptr);
+
+                DataReaderQos datareader_qos;
+                subscriber->get_default_datareader_qos(datareader_qos);
+                datareader_qos.data_sharing().off();
+                auto datareader = subscriber->create_datareader(topic, datareader_qos, &listener);
+                ASSERT_NE(datareader, nullptr);
+
+                HelloWorld msg;
+                msg.index(1);
+                datawriter->write(&msg);
+
+                SampleInfo info;
+                datareader->take_next_sample(&msg, &info);
+
+                participant->delete_contained_entities();
+                factory->delete_participant(participant);
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            };
+
+    std::vector<std::thread> threads;
+    threads.reserve(NUM_THREADS);
+    for (size_t i = 0; i < NUM_THREADS; ++i)
+    {
+        threads.emplace_back(create_entities);
+    }
+
+    for (auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    EXPECT_EQ(listener.reader_other_calls.load(), 0u);
+    EXPECT_EQ(listener.writer_other_calls.load(), 0u);
+}
+
+TEST(DDSDiscovery, EndpointMatchingCallbackAlwaysTrue)
+{
+    using namespace std::chrono_literals;
+
+    std::atomic_uint32_t writer_calls {0};
+    std::atomic_uint32_t reader_calls {0};
+
+    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    writer.set_should_endpoints_match_function(
+        [&](const eprosima::fastdds::dds::SubscriptionBuiltinTopicData&,
+        const eprosima::fastdds::dds::PublicationBuiltinTopicData&)
+        {
+            ++writer_calls;
+            return true;
+        });
+
+    PubSubReader<HelloWorldPubSubType> reader(TEST_TOPIC_NAME);
+    reader.set_should_endpoints_match_function(
+        [&](const eprosima::fastdds::dds::SubscriptionBuiltinTopicData&,
+        const eprosima::fastdds::dds::PublicationBuiltinTopicData&)
+        {
+            ++reader_calls;
+            return true;
+        });
+
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    reader.wait_discovery(3s, 1u);
+    writer.wait_discovery(1u, 3s);
+
+    ASSERT_EQ(reader.get_matched(), 1u);
+    ASSERT_EQ(writer.get_matched(), 1u);
+    ASSERT_GE(reader_calls.load(), 1u);
+    ASSERT_GE(writer_calls.load(), 1u);
+}
+
+TEST(DDSDiscovery, EndpointMatchingCallbackAlwaysFalse)
+{
+    using namespace std::chrono_literals;
+
+    std::atomic_uint32_t writer_calls {0};
+    std::atomic_uint32_t reader_calls {0};
+
+    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    writer.set_should_endpoints_match_function(
+        [&](const eprosima::fastdds::dds::SubscriptionBuiltinTopicData&,
+        const eprosima::fastdds::dds::PublicationBuiltinTopicData&)
+        {
+            ++writer_calls;
+            return false;
+        });
+
+    PubSubReader<HelloWorldPubSubType> reader(TEST_TOPIC_NAME);
+    reader.set_should_endpoints_match_function(
+        [&](const eprosima::fastdds::dds::SubscriptionBuiltinTopicData&,
+        const eprosima::fastdds::dds::PublicationBuiltinTopicData&)
+        {
+            ++reader_calls;
+            return false;
+        });
+
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    reader.wait_discovery(2s, 1u);
+    writer.wait_discovery(1u, 2s);
+
+    ASSERT_FALSE(reader.is_matched());
+    ASSERT_FALSE(writer.is_matched());
+    ASSERT_GE(reader_calls.load(), 1u);
+    ASSERT_GE(writer_calls.load(), 1u);
+    ASSERT_EQ(reader.get_matched(), 0u);
+    ASSERT_EQ(writer.get_matched(), 0u);
+}
+
+TEST(DDSDiscovery, EndpointMatchingCallbackSelectivelyMatchesOneWriter)
+{
+    using namespace std::chrono_literals;
+
+    // Writer that will be matched
+    PubSubWriter<HelloWorldPubSubType> allowed_writer(TEST_TOPIC_NAME);
+    allowed_writer.setPublisherIDs(1u, 1u);
+    allowed_writer.init();
+    ASSERT_TRUE(allowed_writer.isInitialized());
+
+    // Writer that wont be matched due to the callback
+    PubSubWriter<HelloWorldPubSubType> rejected_writer(TEST_TOPIC_NAME);
+    rejected_writer.setPublisherIDs(2u, 2u);
+    rejected_writer.init();
+    ASSERT_TRUE(rejected_writer.isInitialized());
+
+    const auto allowed_entity_id = allowed_writer.datawriter_guid().entityId;
+
+    std::atomic_uint32_t reader_calls {0};
+
+
+    PubSubReader<HelloWorldPubSubType> reader(TEST_TOPIC_NAME);
+    reader.set_should_endpoints_match_function(
+        [&, allowed_entity_id](
+            const eprosima::fastdds::dds::SubscriptionBuiltinTopicData&,
+            const eprosima::fastdds::dds::PublicationBuiltinTopicData& writer_info)
+        {
+            // Simple callback that will only accept the allowed_writer
+            ++reader_calls;
+            return writer_info.guid.entityId == allowed_entity_id;
+        });
+    reader.init();
+    ASSERT_TRUE(reader.isInitialized());
+
+    reader.wait_discovery(3s, 1u);
+    allowed_writer.wait_discovery(1u, 3s);
+
+    // Check that only the allowed writer is matched from the reader's perspective
+    ASSERT_EQ(reader.get_matched(), 1u);
+    ASSERT_GE(reader_calls.load(), 1u);
+
+    // NOTE: Beware, the rejected_writer hasn't rejected the reader, so it believes it is matched.
 }
 
 /**
@@ -2113,9 +2297,9 @@ TEST(DDSDiscovery, client_server_participants_with_different_domain_ids_discover
     client_domain_3.init();
     EXPECT_TRUE(client_domain_3.isInitialized());
 
-    server_domain_1.wait_discovery(std::chrono::seconds(2));
-    client_domain_2.wait_discovery(std::chrono::seconds(2));
-    client_domain_3.wait_discovery(std::chrono::seconds(2));
+    server_domain_1.wait_discovery(std::chrono::seconds(5));
+    client_domain_2.wait_discovery(2, std::chrono::seconds(5));
+    client_domain_3.wait_discovery(std::chrono::seconds(5));
 
     ASSERT_TRUE(client_domain_2.is_matched());
     ASSERT_TRUE(client_domain_3.is_matched());
@@ -2130,4 +2314,465 @@ TEST(DDSDiscovery, client_server_participants_with_different_domain_ids_discover
 
     // All data received
     EXPECT_EQ(client_domain_3.block_for_all(std::chrono::seconds(3)), data_size);
+}
+
+/*!
+ * @test: regression test for redmine issue #23047
+ *
+ * This test checks that type_information is always copied between
+ * proxy data copies/assignments, even if the type information is not assigned.
+ *
+ */
+TEST(DDSDiscovery, proxy_data_assignment_operator_always_include_type_information)
+{
+    using namespace eprosima;
+    using namespace eprosima::fastdds::dds;
+    using namespace eprosima::fastdds::rtps;
+    using namespace eprosima::fastdds::dds::xtypes;
+
+    /**
+     * A dummy type support class with the same type name as HelloWorldPubSubType.
+     * Does not register any TypeIdentifier so related proxies will have no
+     * type_information assigned.
+     */
+    class HelloWorldDummyType : public TopicDataType
+    {
+    public:
+
+        HelloWorldDummyType()
+            : TopicDataType()
+        {
+            set_name("HelloWorld");
+            is_compute_key_provided = false;
+            max_serialized_type_size = 16;
+        }
+
+        bool serialize(
+                const void* const,
+                fastdds::rtps::SerializedPayload_t&,
+                fastdds::dds::DataRepresentationId_t) override
+        {
+            return true;
+        }
+
+        bool deserialize(
+                fastdds::rtps::SerializedPayload_t&,
+                void*) override
+        {
+            return true;
+        }
+
+        uint32_t calculate_serialized_size(
+                const void* const,
+                fastdds::dds::DataRepresentationId_t) override
+        {
+            return 0u;
+        }
+
+        void* create_data() override
+        {
+            return nullptr;
+        }
+
+        void delete_data(
+                void*) override
+        {
+        }
+
+        bool compute_key(
+                fastdds::rtps::SerializedPayload_t&,
+                fastdds::rtps::InstanceHandle_t&,
+                bool) override
+        {
+            return true;
+        }
+
+        bool compute_key(
+                const void* const,
+                fastdds::rtps::InstanceHandle_t&,
+                bool) override
+        {
+            return false;
+        }
+
+    private:
+
+        using TopicDataType::calculate_serialized_size;
+        using TopicDataType::serialize;
+    };
+
+    struct CustomParticipantReaders
+    {
+        class ReadersListener : public eprosima::fastdds::dds::DataReaderListener
+        {
+        public:
+
+            ReadersListener(
+                    std::condition_variable& cv)
+                : cv_(cv)
+            {
+            }
+
+            void on_subscription_matched(
+                    eprosima::fastdds::dds::DataReader* /*datareader*/,
+                    const eprosima::fastdds::dds::SubscriptionMatchedStatus& info) override
+            {
+                if (0 < info.current_count_change)
+                {
+                    std::cout << "Subscriber matched publisher " << info.last_publication_handle << std::endl;
+                    n_matches_++;
+                    cv_.notify_one();
+                }
+                else
+                {
+                    std::cout << "Subscriber unmatched publisher " << info.last_publication_handle << std::endl;
+                    n_matches_--;
+                    cv_.notify_one();
+                }
+            }
+
+            std::atomic<uint16_t> n_matches_{0};
+            std::condition_variable& cv_;
+
+        };
+
+        CustomParticipantReaders(
+                const std::vector<std::pair<std::string, TypeSupport>>& topics_and_types,
+                uint32_t ms_delay_between_creations = 10)
+        {
+            readers_listeners_.reserve(topics_and_types.size());
+
+            DomainParticipantQos pqos;
+
+            pqos.transport().use_builtin_transports = false;
+            auto udp_transport = std::make_shared<UDPv4TransportDescriptor>();
+            pqos.transport().user_transports.push_back(udp_transport);
+
+            participant_ = DomainParticipantFactory::get_instance()->create_participant(
+                (uint32_t)GET_PID() % 230, pqos, nullptr);
+
+            if (participant_ == nullptr)
+            {
+                std::cerr << "Error creating participant" << std::endl;
+            }
+
+            subscriber_ = participant_->create_subscriber(SUBSCRIBER_QOS_DEFAULT);
+
+            if (subscriber_ == nullptr)
+            {
+                std::cerr << "Error creating subscriber" << std::endl;
+            }
+
+            for (auto& topic_and_type : topics_and_types)
+            {
+                participant_->register_type(topic_and_type.second);
+
+                Topic* topic;
+
+                // Magic to fit with the same one in PubSubWriter/Reader
+                std::ostringstream t;
+                t << topic_and_type.first << "_" << asio::ip::host_name() << "_" << GET_PID();
+
+                topic = participant_->create_topic(t.str(), topic_and_type.second->get_name(), TOPIC_QOS_DEFAULT);
+
+                if (topic == nullptr)
+                {
+                    std::cerr << "Error creating topic" << std::endl;
+                }
+
+                readers_listeners_.emplace_back(std::make_shared<ReadersListener>(cv_));
+
+                DataReader* reader;
+                reader = subscriber_->create_datareader(&(*topic), DATAREADER_QOS_DEFAULT,
+                                readers_listeners_.back().get());
+                if (reader == nullptr)
+                {
+                    std::cerr << "Error creating reader" << std::endl;
+                }
+
+                topics_and_readers_.push_back({topic, reader});
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(ms_delay_between_creations));
+            }
+        }
+
+        bool wait_discovery(
+                const std::vector<unsigned int>& expected_matches,
+                std::chrono::seconds timeout = std::chrono::seconds::zero())
+        {
+            if (expected_matches.size() != readers_listeners_.size())
+            {
+                EPROSIMA_LOG_ERROR(TEST, "Expected matches size does not match readers listeners size");
+                return false;
+            }
+
+            bool ret = false;
+            std::unique_lock<std::mutex> lock(discovery_mutex_);
+
+            if (timeout == std::chrono::seconds::zero())
+            {
+                cv_.wait(lock, [&]()
+                        {
+                            for (size_t i = 0; i < readers_listeners_.size(); ++i)
+                            {
+                                if (readers_listeners_[i]->n_matches_.load() < expected_matches[i])
+                                {
+                                    return false;
+                                }
+                            }
+                            ret = true;
+                            return true;
+                        });
+            }
+            else
+            {
+                cv_.wait_for(lock, timeout, [&]()
+                        {
+                            for (size_t i = 0; i < readers_listeners_.size(); ++i)
+                            {
+                                if (readers_listeners_[i]->n_matches_.load() < expected_matches[i])
+                                {
+                                    return false;
+                                }
+                            }
+                            ret = true;
+                            return true;
+                        });
+            }
+
+            return ret;
+        }
+
+        ~CustomParticipantReaders()
+        {
+            if (participant_)
+            {
+                participant_->delete_contained_entities();
+                DomainParticipantFactory::get_instance()->delete_participant(participant_);
+            }
+        }
+
+        DomainParticipant* participant_;
+        std::vector<std::pair<Topic*, DataReader*>> topics_and_readers_;
+        Subscriber* subscriber_;
+        std::mutex discovery_mutex_;
+        std::condition_variable cv_;
+        std::vector<std::shared_ptr<ReadersListener>> readers_listeners_;
+    };
+
+    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+    writer.disable_builtin_transport();
+    auto udp_transport = std::make_shared<UDPv4TransportDescriptor>();
+    writer.add_user_transport_to_pparams(udp_transport);
+
+    std::vector<std::pair<std::string, TypeSupport>> topics_and_types;
+    topics_and_types.reserve(2);
+    topics_and_types.push_back(std::make_pair("OtherTopic", TypeSupport(new Data64kbPubSubType())));
+    topics_and_types.push_back(std::make_pair(TEST_TOPIC_NAME, TypeSupport(new HelloWorldDummyType())));
+
+    writer.init();
+
+    // Create two readers in the same participant on different topics
+    // When the second reader is registered, it will try to match with the writer,
+    // so it lookups and loads its ReaderProxyData into a temporal reader proxy pool
+    // previously filled with the Data64k type (with type_information), which is not cleared before.
+    // If the assignment operation in the ReaderProxyData for the HelloworldDummy type does not
+    // always copy the type_information into the temporal proxydata,
+    // the second reader will not be able to match with the writer, failing at EDP::valid_matching
+    CustomParticipantReaders readers(
+        topics_and_types);
+
+    // Wait for the writer to match the second reader
+    writer.wait_discovery();
+    ASSERT_EQ(writer.get_matched(), 1u);
+
+    // The second reader should match with the writer
+    ASSERT_TRUE(readers.wait_discovery({0u, 1u}, std::chrono::seconds(3)));
+}
+
+/*!
+ * @test: regression test for redmine issue #23252
+ *
+ * This test checks that only one packet is sent to multicast (per interface)
+ * when a writer is matched with multiple readers.
+ * Typically, it is expected to send one via localhost and another via local lan interface.
+ */
+TEST(DDSDiscovery, multicast_only_one_packet_sent_when_multiple_multicast_readers_matched)
+{
+    using namespace eprosima::fastdds::dds;
+    using namespace eprosima::fastdds::rtps;
+    using namespace eprosima::fastdds::rtps;
+
+    std::vector<std::shared_ptr<PubSubReader<HelloWorldPubSubType>>> readers;
+    PubSubWriter<HelloWorldPubSubType> writer(TEST_TOPIC_NAME);
+
+    auto writer_test_transport = std::make_shared<test_UDPv4TransportDescriptor>();
+
+    const uint8_t n_readers = 5u;
+    uint8_t n_multicast_times_sent = 0u;
+
+    // Add new multicast locator with IP 239.255.0.4 and port 7900
+    DataReaderQos reader_qos;
+    eprosima::fastdds::rtps::Locator_t new_multicast_locator;
+    eprosima::fastdds::rtps::LocatorList multicast_locators;
+    eprosima::fastdds::rtps::IPLocator::setIPv4(new_multicast_locator, "239.255.0.4");
+    new_multicast_locator.port = 6900u;
+    multicast_locators.push_back(new_multicast_locator);
+
+    writer_test_transport->locator_filter_ = [&n_multicast_times_sent, &new_multicast_locator](
+        const eprosima::fastdds::rtps::Locator& destination, int32_t)
+            {
+                if (destination == new_multicast_locator)
+                {
+                    ++n_multicast_times_sent;
+                }
+                // Do not drop the packet in any case
+                return false;
+            };
+
+    writer.disable_builtin_transport().add_user_transport_to_pparams(writer_test_transport);
+
+    readers.reserve(n_readers);
+    for (size_t i = 0; i < n_readers; ++i)
+    {
+        readers.emplace_back(
+            std::make_shared<PubSubReader<HelloWorldPubSubType>>(TEST_TOPIC_NAME));
+        readers.back()->multicast_locator_list(multicast_locators);
+        readers.back()->init();
+        ASSERT_TRUE(readers.back()->isInitialized());
+    }
+
+    writer.init();
+    ASSERT_TRUE(writer.isInitialized());
+
+    // Wait for discoveries
+    writer.wait_discovery(5);
+    auto default_helloworld_data = default_helloworld_data_generator(1);
+
+    for (const auto& reader : readers)
+    {
+        reader->wait_discovery(std::chrono::seconds::zero(), 1u);
+        reader->startReception(default_helloworld_data);
+    }
+
+    writer.send_sample(default_helloworld_data.back());
+
+    // Sample should be received by all readers
+    for (const auto& reader : readers)
+    {
+        ASSERT_EQ(reader->block_for_all(std::chrono::seconds(3)), 1u);
+    }
+
+    std::vector<eprosima::fastdds::rtps::IPFinder::info_IP> ips;
+
+    ASSERT_TRUE(IPFinder::getIPs(&ips, true));
+
+    uint8_t n_v4_addresses = 0u;
+    for (const auto& ip : ips)
+    {
+        if (ip.type == eprosima::fastdds::rtps::IPFinder::IP4 ||
+                ip.type == eprosima::fastdds::rtps::IPFinder::IP4_LOCAL)
+        {
+            ++n_v4_addresses;
+        }
+    }
+
+    // Check sample was only sent one per interface
+    ASSERT_EQ(n_multicast_times_sent, n_v4_addresses);
+}
+
+//! Regression test for redmine issue 25485.
+//! A participant using STATIC EDP parses 'EDS_*' properties received from any discovered
+//! participant (regardless of the discovery protocol used by that remote participant) to learn
+//! about its statically discovered endpoints. Such a property encodes an EntityId_t (at most 4
+//! octets, i.e. at most 3 dots) as a dot-separated string. A malformed property with more dots
+//! than that used to cause an out-of-bounds write while being parsed. Check that the victim
+//! participant safely survives such a malformed property, and keeps working normally afterwards.
+TEST(DDSDiscovery, static_edp_malformed_entity_id_property)
+{
+    using namespace eprosima::fastdds::dds;
+    using namespace eprosima::fastdds::rtps;
+
+    /* Victim listener: keeps track of participant discovery */
+    class DiscoveryListener : public DomainParticipantListener
+    {
+    public:
+
+        void on_participant_discovery(
+                DomainParticipant*,
+                ParticipantDiscoveryStatus status,
+                const ParticipantBuiltinTopicData&,
+                bool& should_be_ignored) override
+        {
+            should_be_ignored = false;
+            if (ParticipantDiscoveryStatus::DISCOVERED_PARTICIPANT == status)
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                participant_discovered_ = true;
+                cv_.notify_all();
+            }
+        }
+
+        bool wait_participant_discovery()
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            return cv_.wait_for(lock, std::chrono::seconds(5), [this]()
+                           {
+                               return participant_discovered_;
+                           });
+        }
+
+    private:
+
+        using DomainParticipantListener::on_participant_discovery;
+
+        std::mutex mtx_;
+        std::condition_variable cv_;
+        bool participant_discovered_ = false;
+    };
+
+    DomainParticipantFactory* factory = DomainParticipantFactory::get_instance();
+    uint32_t domain_id = (uint32_t)GET_PID() % 230;
+
+    /* Victim: uses STATIC EDP with an empty configuration, so it will try to parse 'EDS_*'
+     * properties advertised by any discovered participant. */
+    DomainParticipantQos victim_qos = PARTICIPANT_QOS_DEFAULT;
+    victim_qos.wire_protocol().builtin.discovery_config.use_SIMPLE_EndpointDiscoveryProtocol = false;
+    victim_qos.wire_protocol().builtin.discovery_config.use_STATIC_EndpointDiscoveryProtocol = true;
+    victim_qos.wire_protocol().builtin.discovery_config.static_edp_xml_config(
+        "data://<staticdiscovery></staticdiscovery>");
+
+    DiscoveryListener victim_listener;
+    DomainParticipant* victim = factory->create_participant(domain_id, victim_qos, &victim_listener);
+    ASSERT_NE(nullptr, victim);
+
+    /* Attacker: announces a malformed EDS_ property. An EntityId_t only has 4 octets, so at most
+     * 3 dots are expected in the property value. This one has way more than that. */
+    DomainParticipantQos attacker_qos = PARTICIPANT_QOS_DEFAULT;
+    {
+        Property malformed;
+        malformed.name("EDS_RA_5");
+        std::string malformed_value = "66";
+        for (size_t i = 0; i < 300; ++i)
+        {
+            malformed_value += ".66";
+        }
+        malformed.value(malformed_value);
+        malformed.propagate(true);
+        attacker_qos.properties().properties().push_back(malformed);
+    }
+
+    DiscoveryListener attacker_listener;
+    DomainParticipant* attacker = factory->create_participant(domain_id, attacker_qos, &attacker_listener);
+    ASSERT_NE(nullptr, attacker);
+
+    /* If the parsing bug were still present, the victim would either crash while processing the
+     * malformed property, or silently drop it and be unable to react to further discovery
+     * traffic. Check that it stays alive and discovers the attacker normally. */
+    ASSERT_TRUE(victim_listener.wait_participant_discovery());
+    ASSERT_TRUE(attacker_listener.wait_participant_discovery());
+
+    /* Clean up */
+    factory->delete_participant(attacker);
+    factory->delete_participant(victim);
 }

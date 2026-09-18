@@ -29,6 +29,7 @@
 #include <fastdds/dds/xtypes/dynamic_types/DynamicTypeBuilderFactory.hpp>
 #include <fastdds/dds/xtypes/dynamic_types/MemberDescriptor.hpp>
 #include <fastdds/dds/xtypes/dynamic_types/TypeDescriptor.hpp>
+#include <fastdds/dds/xtypes/utils.hpp>
 #include <ScopedLogs.hpp>
 
 using namespace eprosima::fastdds::rtps;
@@ -40,18 +41,65 @@ void encoding_decoding_test(
         DynamicType::_ref_type created_type,
         DynamicData::_ref_type encoding_data,
         DynamicData::_ref_type decoding_data,
-        DataRepresentationId_t encoding
-        )
+        DataRepresentationId_t encoding,
+        bool check_max_size = true,
+        DynamicData::_ref_type expected_data = nullptr,
+        DynamicType::_ref_type decoding_type = nullptr
+)
 {
     TypeSupport pubsubType {new DynamicPubSubType(created_type)};
     uint32_t payloadSize =
             static_cast<uint32_t>(pubsubType.calculate_serialized_size(&encoding_data, encoding));
     SerializedPayload_t payload(payloadSize);
     EXPECT_TRUE(pubsubType.serialize(&encoding_data, payload, encoding));
+
     EXPECT_EQ(payload.length, payloadSize);
-    EXPECT_LE(payload.length, pubsubType->max_serialized_type_size);
-    EXPECT_TRUE(pubsubType.deserialize(payload, &decoding_data));
-    EXPECT_TRUE(decoding_data->equals(encoding_data));
+    if (check_max_size)
+    {
+        EXPECT_LE(payload.length, pubsubType->max_serialized_type_size);
+    }
+    if (decoding_type == nullptr)
+    {
+        EXPECT_TRUE(pubsubType.deserialize(payload, &decoding_data));
+    }
+    else
+    {
+        TypeSupport pubsubTypeDecoding {new DynamicPubSubType(decoding_type)};
+        EXPECT_TRUE(pubsubTypeDecoding.deserialize(payload, &decoding_data));
+    }
+
+    if (expected_data)
+    {
+        EXPECT_TRUE(decoding_data->equals(expected_data));
+    }
+    else
+    {
+        EXPECT_TRUE(decoding_data->equals(encoding_data));
+    }
+
+    // Test JSON serialization and deserialization for struct types
+    if (TK_STRUCTURE == created_type->get_kind())
+    {
+        std::vector<DynamicDataJsonFormat> format_options =
+        {DynamicDataJsonFormat::EPROSIMA, DynamicDataJsonFormat::OMG};
+        for (const auto& format_kind : format_options)
+        {
+            std::stringstream generated_json;
+            EXPECT_EQ(json_serialize(
+                        encoding_data,
+                        format_kind,
+                        generated_json), RETCODE_OK);
+
+            DynamicData::_ref_type data_from_json;
+            EXPECT_EQ(json_deserialize(
+                        generated_json.str(),
+                        created_type,
+                        format_kind,
+                        data_from_json), RETCODE_OK);
+
+            EXPECT_TRUE(encoding_data->equals(data_from_json));
+        }
+    }
 
     DomainParticipant* participant = DomainParticipantFactory::get_instance()->create_participant(
         0, PARTICIPANT_QOS_DEFAULT);
@@ -69,7 +117,7 @@ void encoding_decoding_test(
 // Testing the primitive creation APIS
 // and get_primitive_type().
 class DynamicTypesPrimitiveTestsAPIs
-    : public testing::TestWithParam <TypeKind>
+    : public testing::TestWithParam<TypeKind>
 {
 };
 
@@ -476,7 +524,7 @@ TEST_F(DynamicTypesTests, DynamicType_basic)
     //    + indexing by id
     DynamicTypeMembersById members_by_id;
     EXPECT_EQ(RETCODE_OK, struct_type_builder->get_all_members(members_by_id));
-    EXPECT_EQ(2, members_by_id.size());
+    EXPECT_EQ(2u, members_by_id.size());
 
     auto dm3 = members_by_id[3];
     ASSERT_TRUE(dm3);
@@ -495,7 +543,7 @@ TEST_F(DynamicTypesTests, DynamicType_basic)
     //    + indexing by name
     DynamicTypeMembersByName members_by_name;
     EXPECT_EQ(RETCODE_OK, struct_type_builder->get_all_members_by_name(members_by_name));
-    EXPECT_EQ(2, members_by_name.size());
+    EXPECT_EQ(2u, members_by_name.size());
 
     dm3 = members_by_name["int32"];
     ASSERT_EQ(RETCODE_OK, dm3->get_descriptor(md));
@@ -517,7 +565,7 @@ TEST_F(DynamicTypesTests, DynamicType_basic)
     ASSERT_EQ(RETCODE_OK, struct_type_builder->add_member(md));
 
     EXPECT_EQ(RETCODE_OK, struct_type_builder->get_all_members(members_by_id));
-    ASSERT_EQ(3, members_by_id.size());
+    ASSERT_EQ(3u, members_by_id.size());
 
     MemberDescriptor::_ref_type tmp = traits<MemberDescriptor>::make_shared();
     auto dm = members_by_id[3];
@@ -566,7 +614,8 @@ TEST_F(DynamicTypesTests, DynamicTypeBuilderFactory_create_strings)
     DynamicTypeBuilderFactory::_ref_type factory {DynamicTypeBuilderFactory::get_instance()};
 
     // • strings
-    DynamicTypeBuilder::_ref_type created_builder {factory->create_string_type(static_cast<uint32_t>(LENGTH_UNLIMITED))};
+    DynamicTypeBuilder::_ref_type created_builder {factory->create_string_type(
+                                                       static_cast<uint32_t>(LENGTH_UNLIMITED))};
     ASSERT_TRUE(created_builder);
 
     DynamicType::_ref_type type {created_builder->build()};
@@ -901,7 +950,7 @@ TEST_F(DynamicTypesTests, DynamicType_uint32)
 
     uint64_t uTest64;
     EXPECT_EQ(data->get_uint64_value(uTest64, MEMBER_ID_INVALID), RETCODE_OK);
-    EXPECT_EQ(uTest64, 1);
+    EXPECT_EQ(uTest64, 1ull);
 
     double fTest64;
     EXPECT_EQ(data->get_float64_value(fTest64, MEMBER_ID_INVALID), RETCODE_OK);
@@ -1745,7 +1794,7 @@ TEST_F(DynamicTypesTests, DynamicType_uint16)
 
     uint64_t uTest64;
     EXPECT_EQ(data->get_uint64_value(uTest64, MEMBER_ID_INVALID), RETCODE_OK);
-    EXPECT_EQ(1, uTest64);
+    EXPECT_EQ(1ull, uTest64);
 
     float fTest32;
     EXPECT_EQ(data->get_float32_value(fTest32, MEMBER_ID_INVALID), RETCODE_OK);
@@ -3691,7 +3740,7 @@ TEST_F(DynamicTypesTests, DynamicType_boolean)
 
     uint64_t uTest64 {1};
     EXPECT_EQ(data->get_uint64_value(uTest64, MEMBER_ID_INVALID), RETCODE_OK);
-    EXPECT_EQ(0, uTest64);
+    EXPECT_EQ(0ull, uTest64);
 
     float fTest32 {1};
     EXPECT_EQ(data->get_float32_value(fTest32, MEMBER_ID_INVALID), RETCODE_OK);
@@ -4819,7 +4868,7 @@ TEST_F(DynamicTypesTests, DynamicType_alias)
 
     uint64_t uTest64;
     EXPECT_EQ(data->get_uint64_value(uTest64, MEMBER_ID_INVALID), RETCODE_OK);
-    EXPECT_EQ(uTest64, 2);
+    EXPECT_EQ(uTest64, 2ull);
 
     double fTest64;
     EXPECT_EQ(data->get_float64_value(fTest64, MEMBER_ID_INVALID), RETCODE_OK);
@@ -5517,7 +5566,7 @@ TEST_F(DynamicTypesTests, DynamicType_bitmask)
     member_descriptor = traits<MemberDescriptor>::make_shared();
     member_descriptor->type(factory->get_primitive_type(TK_BOOLEAN));
     member_descriptor->name("BIT5");
-    member_descriptor->id(5);
+    member_descriptor->position(5);
     EXPECT_EQ(builder->add_member(member_descriptor), RETCODE_OK);
 
     {
@@ -5525,16 +5574,16 @@ TEST_F(DynamicTypesTests, DynamicType_bitmask)
         member_descriptor = traits<MemberDescriptor>::make_shared();
         member_descriptor->type(factory->get_primitive_type(TK_BOOLEAN));
         member_descriptor->name("BIT6");
-        // Test that not setting the id it will try with next id (6) which is invalid due to bound.
+        // Test that not setting the position it will try with next position (6) which is invalid due to bound.
         EXPECT_EQ(builder->add_member(member_descriptor), RETCODE_BAD_PARAMETER);
-        // Test setting the id 6 which is invalid due to bound.
-        member_descriptor->id(6);
+        // Test setting the position 6 which is invalid due to bound.
+        member_descriptor->position(6);
         EXPECT_EQ(builder->add_member(member_descriptor), RETCODE_BAD_PARAMETER);
         member_descriptor = traits<MemberDescriptor>::make_shared();
         member_descriptor->type(factory->get_primitive_type(TK_BOOLEAN));
         // Test setting with already existing name.
         member_descriptor->name("BIT0");
-        member_descriptor->id(4);
+        member_descriptor->position(4);
         EXPECT_EQ(builder->add_member(member_descriptor), RETCODE_BAD_PARAMETER);
     }
 
@@ -7967,15 +8016,15 @@ TEST_F(DynamicTypesTests, DynamicType_sequence_uint64)
     EXPECT_EQ(data->set_uint64_value(4, 5), RETCODE_OK);
     uint64_t test1 {0};
     EXPECT_EQ(data->get_uint64_value(test1, 0), RETCODE_OK);
-    EXPECT_EQ(1, test1);
+    EXPECT_EQ(1ull, test1);
     EXPECT_EQ(data->get_uint64_value(test1, 1), RETCODE_OK);
-    EXPECT_EQ(2, test1);
+    EXPECT_EQ(2ull, test1);
     EXPECT_EQ(data->get_uint64_value(test1, 2), RETCODE_OK);
-    EXPECT_EQ(3, test1);
+    EXPECT_EQ(3ull, test1);
     EXPECT_EQ(data->get_uint64_value(test1, 3), RETCODE_OK);
-    EXPECT_EQ(4, test1);
+    EXPECT_EQ(4ull, test1);
     EXPECT_EQ(data->get_uint64_value(test1, 4), RETCODE_OK);
-    EXPECT_EQ(5, test1);
+    EXPECT_EQ(5ull, test1);
 
     UInt64Seq test_all {{1, 2, 3, 4, 5}};
     UInt64Seq test_less {{3, 4, 5}};
@@ -13773,8 +13822,9 @@ TEST_F(DynamicTypesTests, DynamicType_XML_struct_with_sequence_of_sequences)
 
     DynamicTypeBuilder::_ref_type xml_type_builder;
     ASSERT_EQ(RETCODE_OK,
-            DomainParticipantFactory::get_instance()->get_dynamic_type_builder_from_xml_by_name("SequenceSequenceStruct",
-            xml_type_builder));
+            DomainParticipantFactory::get_instance()->get_dynamic_type_builder_from_xml_by_name(
+                "SequenceSequenceStruct",
+                xml_type_builder));
 
     DynamicTypeBuilderFactory::_ref_type factory {DynamicTypeBuilderFactory::get_instance()};
 
@@ -14174,7 +14224,7 @@ TEST_F(DynamicTypesTests, DynamicType_XML_Bitmask_test)
     member_descriptor = traits<MemberDescriptor>::make_shared();
     member_descriptor->type(factory->get_primitive_type((TK_BOOLEAN)));
     member_descriptor->name("flag5");
-    member_descriptor->id(5);
+    member_descriptor->position(5);
     builder->add_member(member_descriptor);
 
     ASSERT_TRUE(xml_type_builder->build()->equals(builder->build()));
@@ -14223,6 +14273,117 @@ TEST_F(DynamicTypesTests, TypeDescriptorFullyQualifiedName)
     ASSERT_FALSE(descriptor->is_consistent());
     descriptor->name("my_interface::action*::dds_::Position");
     ASSERT_FALSE(descriptor->is_consistent());
+}
+
+/**
+ * Regression test for CVE-2026-45097.
+ *
+ * Check that the bounds of a sequence are enforced when deserializing data.
+ */
+TEST_F(DynamicTypesTests, SequenceBoundsEnforced)
+{
+    /*
+     * IDL:
+     * struct InnerStruct
+     * {
+     *     long value;
+     * };
+     *
+     * struct UnboundedSequenceStruct
+     * {
+     *     sequence<InnerStruct> seq;
+     * };
+     *
+     * struct BoundedSequenceStruct
+     * {
+     *     sequence<InnerStruct, 2> seq;
+     * };
+     */
+
+    traits<DynamicTypeBuilderFactory>::ref_type factory{ DynamicTypeBuilderFactory::get_instance() };
+
+    const ExtensibilityKind extensibilities[] =
+    {
+        ExtensibilityKind::FINAL, ExtensibilityKind::APPENDABLE, ExtensibilityKind::MUTABLE
+    };
+
+    for (ExtensibilityKind extensibility : extensibilities)
+    {
+        // Create the InnerStruct type
+        TypeDescriptor::_ref_type inner_struct_descriptor{ traits<TypeDescriptor>::make_shared() };
+        // Set extensibility to FINAL
+        inner_struct_descriptor->extensibility_kind(extensibility);
+        inner_struct_descriptor->kind(TK_STRUCTURE);
+        inner_struct_descriptor->name("InnerStruct");
+        DynamicTypeBuilder::_ref_type inner_struct_builder{ factory->create_type(inner_struct_descriptor) };
+        MemberDescriptor::_ref_type member_descriptor{ traits<MemberDescriptor>::make_shared() };
+        member_descriptor->type(factory->get_primitive_type(TK_INT32));
+        member_descriptor->name("value");
+        inner_struct_builder->add_member(member_descriptor);
+        DynamicType::_ref_type inner_type{ inner_struct_builder->build() };
+
+        // Create the UnboundedSequenceStruct type
+        TypeDescriptor::_ref_type unbounded_sequence_struct_descriptor{ traits<TypeDescriptor>::make_shared() };
+        unbounded_sequence_struct_descriptor->extensibility_kind(extensibility);
+        unbounded_sequence_struct_descriptor->kind(TK_STRUCTURE);
+        unbounded_sequence_struct_descriptor->name("UnboundedSequenceStruct");
+        DynamicTypeBuilder::_ref_type unbounded_sequence_struct_builder{ factory->create_type(
+                                                                             unbounded_sequence_struct_descriptor) };
+        DynamicTypeBuilder::_ref_type unbounded_sequence_builder{ factory->create_sequence_type(inner_type,
+                                                                          static_cast<uint32_t>(LENGTH_UNLIMITED)) };
+        member_descriptor = traits<MemberDescriptor>::make_shared();
+        member_descriptor->type(unbounded_sequence_builder->build());
+        member_descriptor->name("seq");
+        unbounded_sequence_struct_builder->add_member(member_descriptor);
+        DynamicType::_ref_type unbounded_type{ unbounded_sequence_struct_builder->build() };
+
+        // Create the BoundedSequenceStruct type
+        TypeDescriptor::_ref_type bounded_sequence_struct_descriptor{ traits<TypeDescriptor>::make_shared() };
+        bounded_sequence_struct_descriptor->extensibility_kind(extensibility);
+        bounded_sequence_struct_descriptor->kind(TK_STRUCTURE);
+        bounded_sequence_struct_descriptor->name("BoundedSequenceStruct");
+        DynamicTypeBuilder::_ref_type bounded_sequence_struct_builder{ factory->create_type(
+                                                                           bounded_sequence_struct_descriptor) };
+        DynamicTypeBuilder::_ref_type bounded_sequence_builder{ factory->create_sequence_type(inner_type, 2) };
+        member_descriptor = traits<MemberDescriptor>::make_shared();
+        member_descriptor->type(bounded_sequence_builder->build());
+        member_descriptor->name("seq");
+        bounded_sequence_struct_builder->add_member(member_descriptor);
+        DynamicType::_ref_type bounded_type{ bounded_sequence_struct_builder->build() };
+
+        DynamicData::_ref_type inner_data{ DynamicDataFactory::get_instance()->create_data(inner_type) };
+        inner_data->set_int32_value(0, 42);
+
+        // Create input data with 3 elements in the sequence, which exceeds the bound of 2 in BoundedSequenceStruct
+        DynamicData::_ref_type input_data{ DynamicDataFactory::get_instance()->create_data(unbounded_type) };
+        {
+            DynamicData::_ref_type seq_data;
+            ASSERT_EQ(input_data->get_complex_value(seq_data, 0), RETCODE_OK);
+            ASSERT_EQ(seq_data->set_complex_value(0, inner_data->clone()), RETCODE_OK);
+            ASSERT_EQ(seq_data->set_complex_value(1, inner_data->clone()), RETCODE_OK);
+            ASSERT_EQ(seq_data->set_complex_value(2, inner_data->clone()), RETCODE_OK);
+            ASSERT_EQ(input_data->set_complex_value(0, seq_data), RETCODE_OK);
+        }
+
+        // Create expected output data with only the first 2 elements
+        DynamicData::_ref_type expected_output_data{ DynamicDataFactory::get_instance()->create_data(bounded_type) };
+        {
+            DynamicData::_ref_type seq_data;
+            ASSERT_EQ(expected_output_data->get_complex_value(seq_data, 0), RETCODE_OK);
+            ASSERT_EQ(seq_data->set_complex_value(0, inner_data->clone()), RETCODE_OK);
+            ASSERT_EQ(seq_data->set_complex_value(1, inner_data->clone()), RETCODE_OK);
+            ASSERT_EQ(expected_output_data->set_complex_value(0, seq_data), RETCODE_OK);
+        }
+
+        for (auto encoding : encodings)
+        {
+            DynamicData::_ref_type output_data{ DynamicDataFactory::get_instance()->create_data(bounded_type) };
+            encoding_decoding_test(unbounded_type, input_data, output_data, encoding, false, expected_output_data,
+                    bounded_type);
+        }
+
+    }
+
 }
 
 int main(

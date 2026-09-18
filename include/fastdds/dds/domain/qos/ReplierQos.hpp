@@ -36,7 +36,20 @@ public:
     /**
      * @brief Constructor
      */
-    FASTDDS_EXPORTED_API ReplierQos() = default;
+    FASTDDS_EXPORTED_API ReplierQos()
+    {
+        // Set reliability to RELIABLE_RELIABILITY_QOS by default
+        writer_qos.reliability().kind = RELIABLE_RELIABILITY_QOS;
+        reader_qos.reliability().kind = RELIABLE_RELIABILITY_QOS;
+
+        // Set durability to VOLATILE_DURABILITY_QOS by default
+        writer_qos.durability().kind = VOLATILE_DURABILITY_QOS;
+        reader_qos.durability().kind = VOLATILE_DURABILITY_QOS;
+
+        // Set history to KEEP_ALL_HISTORY_QOS by default
+        writer_qos.history().kind = KEEP_ALL_HISTORY_QOS;
+        reader_qos.history().kind = KEEP_ALL_HISTORY_QOS;
+    }
 
     /**
      * @brief Equal comparison operator

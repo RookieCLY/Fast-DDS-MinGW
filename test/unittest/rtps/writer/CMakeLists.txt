@@ -16,6 +16,7 @@
 set(WRITERPROXYTESTS_SOURCE ReaderProxyTests.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/fastdds/core/Time_t.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/fastdds/subscriber/qos/ReaderQos.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/SubscriptionBuiltinTopicData.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/common/LocatorWithMask.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/common/SerializedPayload.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/common/Time_t.cpp
@@ -27,8 +28,10 @@ set(WRITERPROXYTESTS_SOURCE ReaderProxyTests.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetworkInterfaceWithFilter.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/writer/LocatorSelectorSender.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/writer/ReaderProxy.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/utils/Host.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/utils/IPFinder.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/utils/IPLocator.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/utils/md5.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/utils/SystemInfo.cpp)
 
 if(WIN32)
@@ -55,6 +58,8 @@ target_include_directories(ReaderProxyTests PRIVATE
     ${PROJECT_SOURCE_DIR}/test/mock/rtps/ReaderLocator
     ${PROJECT_SOURCE_DIR}/test/mock/rtps/RTPSGapBuilder
     ${PROJECT_SOURCE_DIR}/test/mock/rtps/RTPSMessageGroup
+    ${PROJECT_SOURCE_DIR}/test/mock/rtps/RTPSParticipantImpl
+    ${PROJECT_SOURCE_DIR}/test/mock/rtps/RTPSReader
     ${PROJECT_SOURCE_DIR}/test/mock/rtps/TimedEvent
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_BINARY_DIR}/include
@@ -83,8 +88,10 @@ set(LIVELINESSMANAGERTESTS_SOURCE LivelinessManagerTests.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetworkInterface.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetworkInterfaceWithFilter.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/writer/LivelinessManager.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/utils/Host.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/utils/IPFinder.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/utils/IPLocator.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/utils/md5.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/utils/TimedConditionVariable.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/utils/SystemInfo.cpp)
 

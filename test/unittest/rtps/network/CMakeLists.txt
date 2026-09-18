@@ -26,13 +26,16 @@ set(NETWORKFACTORYTESTS_SOURCE
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/messages/CDRMessage.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/messages/RTPSMessageCreator.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/network/NetworkBuffer.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/network/NetworkConfiguration.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/network/NetworkFactory.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/network/utils/netmask_filter.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/network/utils/network.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/resources/ResourceEvent.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/resources/TimedEvent.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/resources/TimedEventImpl.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/ChainingTransport.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/ChannelResource.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/MulticastTransportInterface.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetmaskFilterKind.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetworkInterface.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/transport/network/NetworkInterfaceWithFilter.cpp
@@ -100,11 +103,9 @@ target_link_libraries(NetworkFactoryTests
     foonathan_memory
     GTest::gtest ${MOCKS}
     $<$<BOOL:${TLS_FOUND}>:OpenSSL::SSL$<SEMICOLON>OpenSSL::Crypto>
+    $<$<BOOL:${QNX}>:socket>
     ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 
-if(QNX)
-    target_link_libraries(NetworkFactoryTests socket)
-endif()
 add_executable(ExternalLocatorsTests
     ExternalLocatorsTests.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/fastdds/core/Time_t.cpp
@@ -112,6 +113,9 @@ add_executable(ExternalLocatorsTests
     ${PROJECT_SOURCE_DIR}/src/cpp/fastdds/subscriber/qos/ReaderQos.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/fastdds/xtypes/exception/Exception.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/attributes/ThreadSettings.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/ParticipantBuiltinTopicData.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/PublicationBuiltinTopicData.cpp
+    ${PROJECT_SOURCE_DIR}/src/cpp/rtps/builtin/data/SubscriptionBuiltinTopicData.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/common/LocatorWithMask.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/common/SerializedPayload.cpp
     ${PROJECT_SOURCE_DIR}/src/cpp/rtps/common/Time_t.cpp
@@ -152,19 +156,13 @@ target_link_libraries(ExternalLocatorsTests
     fastdds::log
     fastdds::xtypes::dynamic-types::impl
     GTest::gmock
+    $<$<BOOL:${QNX}>:socket>
     ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 
-if(QNX)
-    target_link_libraries(ExternalLocatorsTests socket)
-endif()
 if(WIN32)
     add_definitions(-D_WIN32_WINNT=0x0601)
     target_link_libraries(NetworkFactoryTests IPHLPAPI shlwapi) # Later so mocks have precedence
     target_link_libraries(ExternalLocatorsTests IPHLPAPI shlwapi) # Later so mocks have precedence
-endif()
-if (APPLE)
-    target_link_libraries(NetworkFactoryTests "-framework CoreFoundation" "-framework IOKit")
-    target_link_libraries(ExternalLocatorsTests "-framework CoreFoundation" "-framework IOKit")
 endif()
 
 gtest_discover_tests(NetworkFactoryTests)

@@ -91,7 +91,8 @@ public:
         AckedFunctor(
                 AckedFunctor&& r)
         // delegates in copy constructor
-            : AckedFunctor(r)
+            : AckedFunctor(
+                    r)
         {
         }
 
@@ -294,6 +295,9 @@ public:
     // Check if the data queue is empty
     bool data_queue_empty();
 
+    // Swap both EDP and PDP data queues
+    void swap_data_queues();
+
     void to_json(
             nlohmann::json& j) const;
 
@@ -351,9 +355,6 @@ public:
             fastdds::rtps::WriterHistory* writer_history,
             const fastdds::rtps::GuidPrefix_t& entity_guid_prefix);
 
-    // Add own Data(p) in pdp_to_send if not already in it
-    bool add_own_pdp_to_send_();
-
 protected:
 
     // Change a cacheChange by update or new disposal
@@ -397,7 +398,7 @@ protected:
 
     void match_new_server_(
             eprosima::fastdds::rtps::GuidPrefix_t& participant_prefix,
-            bool is_superclient);
+            bool is_client);
 
     void create_virtual_endpoints_(
             eprosima::fastdds::rtps::GuidPrefix_t& participant_prefix);

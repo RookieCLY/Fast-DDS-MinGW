@@ -50,7 +50,6 @@
 #include <fastdds/statistics/IListeners.hpp>
 #include <fastdds/utils/TimedMutex.hpp>
 
-#include <rtps/builtin/data/ProxyDataConverters.hpp>
 #include <rtps/builtin/data/ReaderProxyData.hpp>
 #include <rtps/DataSharing/WriterPool.hpp>
 #include <rtps/flowcontrol/FlowController.hpp>
@@ -78,6 +77,7 @@ BaseWriter::BaseWriter(
     , liveliness_kind_(att.liveliness_kind)
     , liveliness_lease_duration_(att.liveliness_lease_duration)
     , liveliness_announcement_period_(att.liveliness_announcement_period)
+    , transport_priority_(att.transport_priority)
 {
     init(att);
 
@@ -118,12 +118,8 @@ bool BaseWriter::matched_reader_add(
         const SubscriptionBuiltinTopicData& rqos)
 {
     const auto& alloc = mp_RTPSParticipant->get_attributes().allocation;
-    ReaderProxyData rdata(
-        alloc.locators.max_unicast_locators,
-        alloc.locators.max_multicast_locators,
-        alloc.data_limits);
+    ReaderProxyData rdata(alloc.data_limits, rqos);
 
-    from_builtin_to_proxy(rqos, rdata);
     return matched_reader_add_edp(rdata);
 }
 
@@ -142,6 +138,17 @@ bool BaseWriter::set_listener(
 bool BaseWriter::is_async() const
 {
     return is_async_;
+}
+
+int32_t BaseWriter::get_transport_priority() const
+{
+    return transport_priority_;
+}
+
+void BaseWriter::update_attributes(
+        const WriterAttributes& att)
+{
+    transport_priority_ = att.transport_priority;
 }
 
 #ifdef FASTDDS_STATISTICS
@@ -214,9 +221,11 @@ uint32_t BaseWriter::calculate_max_payload_size(
     if ((overhead + min_fragment_size) > max_data_size)
     {
         auto min_datagram_length = overhead + min_fragment_size + 1 + (datagram_length - max_data_size);
-        EPROSIMA_LOG_ERROR(RTPS_WRITER, "Datagram length '" << datagram_length << "' is too small." <<
-                "At least " << min_datagram_length << " bytes are needed to send a message. Fixing fragments to " <<
-                min_fragment_size << " bytes.");
+        EPROSIMA_LOG_ERROR(RTPS_WRITER, "Datagram length '" << datagram_length << "' is too small."
+                                                            << "At least " << min_datagram_length
+                                                            <<
+                " bytes are needed to send a message. Fixing fragments to "
+                                                            << min_fragment_size << " bytes.");
         return min_fragment_size;
     }
 
@@ -247,7 +256,7 @@ bool BaseWriter::send_nts(
 
     return locator_selector.locator_selector.selected_size() == 0 ||
            participant->sendSync(buffers, total_bytes, m_guid, locator_selector.locator_selector.begin(),
-                   locator_selector.locator_selector.end(), max_blocking_time_point);
+                   locator_selector.locator_selector.end(), max_blocking_time_point, transport_priority_);
 }
 
 const dds::LivelinessQosPolicyKind& BaseWriter::get_liveliness_kind() const

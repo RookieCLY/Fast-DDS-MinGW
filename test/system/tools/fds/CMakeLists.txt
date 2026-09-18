@@ -37,14 +37,13 @@ if(Python3_Interpreter_FOUND)
         test_fast_discovery_several_server_ids
         test_fast_discovery_invalid_locator
         test_fast_discovery_non_existent_profile
+        test_fast_discovery_tcp_via_XML
     )
 
     if(SECURITY)
         set(TESTS
             ${TESTS}
             test_fast_discovery_security_disabled
-            test_fast_discovery_security_enabled_xml_prefix
-            test_fast_discovery_security_enabled_cli_prefix
         )
 
         configure_file(${PROJECT_SOURCE_DIR}/test/certs/maincacert.pem
@@ -96,7 +95,7 @@ if(Python3_Interpreter_FOUND)
         if(WIN32)
            add_test(
                     NAME system.tools.fastdds.${TEST}
-                    COMMAND powershell "-File" ${PWS_LAUNCHER}
+                    COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${PWS_LAUNCHER}
                             ${Python3_EXECUTABLE}
                             ${CMAKE_CURRENT_SOURCE_DIR}/tests.py
                             $<TARGET_FILE:fast-discovery-server>
@@ -124,6 +123,7 @@ if(Python3_Interpreter_FOUND)
 
     configure_file("test_xml_discovery_server_profile.xml" "test_xml_discovery_server_profile.xml" COPYONLY)
     configure_file("test_wrong_xml_discovery_server_profile.xml" "test_wrong_xml_discovery_server_profile.xml" COPYONLY)
+    configure_file("test_xml_discovery_server_tcp.xml" "test_xml_discovery_server_tcp.xml" COPYONLY)
     unset(TEST_ENVIRONMENT)
 
 endif()
@@ -157,3 +157,6 @@ target_link_libraries(
     ${CMAKE_DL_LIBS})
 
 gtest_discover_tests(${CLI_MANAGER_TESTS_EXEC})
+
+# Trace each TSan report. No-op if TSan is not enabled
+tsan_name_reports()

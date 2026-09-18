@@ -33,6 +33,7 @@ namespace dds {
  * Please consult each of them to check for implementation details and default values.
  * @ingroup FASTDDS_QOS_MODULE
  */
+FASTDDS_TODO_BEFORE(4, 0, "Remove this class in favor of PublicationBuiltinTopicData");
 class WriterQos
 {
 public:
@@ -62,7 +63,8 @@ public:
                (this->m_publishMode == b.m_publishMode) &&
                (this->m_disablePositiveACKs == b.m_disablePositiveACKs) &&
                (this->representation == b.representation) &&
-               (this->data_sharing == b.data_sharing);
+               (this->data_sharing == b.data_sharing) &&
+               (this->transport_priority == b.transport_priority);
     }
 
     //!Durability Qos, implemented in the library.
@@ -113,6 +115,9 @@ public:
     //!Group Data Qos, NOT implemented in the library.
     GroupDataQosPolicy m_groupData;
 
+    //! Transport priority Qos, implemented in the library.
+    TransportPriorityQosPolicy transport_priority;
+
     //!Publication Mode Qos, implemented in the library.
     PublishModeQosPolicy m_publishMode;
 
@@ -132,6 +137,8 @@ public:
      * Set Qos from another class
      * @param qos Reference from a WriterQos object.
      * @param first_time Boolean indicating whether is the first time (If not some parameters cannot be set).
+     *
+     * @warning The use of this class and methods is discourgaed, consider using PublicationBuiltinTopicData instead.
      */
     FASTDDS_EXPORTED_API void setQos(
             const WriterQos& qos,
@@ -140,12 +147,20 @@ public:
     /**
      * Check if the Qos values are compatible between each other.
      * @return True if correct.
+     *
+     * @warning The use of this class and methods is discourgaed, consider using PublicationBuiltinTopicData instead.
      */
     FASTDDS_EXPORTED_API bool checkQos() const;
 
+    /**
+     * @warning The use of this class and methods is discourgaed, consider using PublicationBuiltinTopicData instead.
+     */
     FASTDDS_EXPORTED_API bool canQosBeUpdated(
             const WriterQos& qos) const;
 
+    /**
+     * @warning The use of this class and methods is discourgaed, consider using PublicationBuiltinTopicData instead.
+     */
     void clear();
 };
 

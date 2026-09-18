@@ -22,7 +22,7 @@
 #include <fastdds/dds/log/Log.hpp>
 #include <fastdds/rtps/writer/RTPSWriter.hpp>
 
-#include "rtps/RTPSDomainImpl.hpp"
+#include "rtps/domain/RTPSDomainImpl.hpp"
 #include "utils/collections/node_size_helpers.hpp"
 #include <rtps/builtin/data/WriterProxyData.hpp>
 #include <rtps/messages/RTPSMessageCreator.hpp>
@@ -54,7 +54,7 @@ WriterProxy::~WriterProxy()
     if (is_alive_ && is_on_same_process_)
     {
         EPROSIMA_LOG_WARNING(RTPS_READER, "Automatically unmatching on ~WriterProxy");
-        BaseWriter* writer = RTPSDomainImpl::find_local_writer(guid());
+        BaseWriter* writer = RTPSDomainImpl::get_instance()->find_writer(guid());
         if (writer)
         {
             writer->matched_reader_remove(reader_->getGuid());
@@ -131,16 +131,16 @@ void WriterProxy::start(
     heartbeat_response_->update_interval(reader_->getTimes().heartbeat_response_delay);
     initial_acknack_->update_interval(reader_->getTimes().initial_acknack_delay);
 
-    locators_entry_.remote_guid = attributes.guid();
-    guid_as_vector_.push_back(attributes.guid());
-    guid_prefix_as_vector_.push_back(attributes.guid().guidPrefix);
-    persistence_guid_ = attributes.persistence_guid();
+    locators_entry_.remote_guid = attributes.guid;
+    guid_as_vector_.push_back(attributes.guid);
+    guid_prefix_as_vector_.push_back(attributes.guid.guidPrefix);
+    persistence_guid_ = attributes.persistence_guid;
     is_alive_ = true;
-    is_on_same_process_ = RTPSDomainImpl::should_intraprocess_between(reader_->getGuid(), attributes.guid());
-    ownership_strength_ = attributes.m_qos.m_ownershipStrength.value;
-    liveliness_kind_ = attributes.m_qos.m_liveliness.kind;
-    locators_entry_.unicast = attributes.remote_locators().unicast;
-    locators_entry_.multicast = attributes.remote_locators().multicast;
+    is_on_same_process_ = RTPSDomainImpl::should_intraprocess_between(reader_->getGuid(), attributes.guid);
+    ownership_strength_ = attributes.ownership_strength.value;
+    liveliness_kind_ = attributes.liveliness.kind;
+    locators_entry_.unicast = attributes.remote_locators.unicast;
+    locators_entry_.multicast = attributes.remote_locators.multicast;
     filter_remote_locators(locators_entry_,
             reader_->getAttributes().external_unicast_locators, reader_->getAttributes().ignore_non_matching_locators);
     is_datasharing_writer_ = is_datasharing;
@@ -160,9 +160,9 @@ void WriterProxy::update(
 #endif // SHOULD_DEBUG_LINUX
 
     assert(is_alive_);
-    ownership_strength_ = attributes.m_qos.m_ownershipStrength.value;
-    locators_entry_.unicast = attributes.remote_locators().unicast;
-    locators_entry_.multicast = attributes.remote_locators().multicast;
+    ownership_strength_ = attributes.ownership_strength.value;
+    locators_entry_.unicast = attributes.remote_locators.unicast;
+    locators_entry_.multicast = attributes.remote_locators.multicast;
     filter_remote_locators(locators_entry_,
             reader_->getAttributes().external_unicast_locators, reader_->getAttributes().ignore_non_matching_locators);
 }
@@ -485,6 +485,18 @@ SequenceNumber_t WriterProxy::next_cache_change_to_be_notified()
     return SequenceNumber_t::unknown();
 }
 
+void WriterProxy::consider_all_notified()
+{
+#ifdef SHOULD_DEBUG_LINUX
+    assert(get_mutex_owner() == get_thread_id());
+#endif // SHOULD_DEBUG_LINUX
+
+    if (last_notified_ < changes_from_writer_low_mark_)
+    {
+        last_notified_ = changes_from_writer_low_mark_;
+    }
+}
+
 bool WriterProxy::perform_initial_ack_nack()
 {
     bool ret_value = false;
@@ -502,7 +514,7 @@ bool WriterProxy::perform_initial_ack_nack()
         SequenceNumberSet_t sns(SequenceNumber_t(0, 0));
         if (is_on_same_process_)
         {
-            BaseWriter* writer = RTPSDomainImpl::find_local_writer(guid());
+            BaseWriter* writer = RTPSDomainImpl::get_instance()->find_writer(guid());
             if (writer)
             {
                 bool tmp;
@@ -623,7 +635,7 @@ void WriterProxy::update_heartbeat_response_interval(
 bool WriterProxy::send(
         const std::vector<eprosima::fastdds::rtps::NetworkBuffer>& buffers,
         const uint32_t& total_bytes,
-        std::chrono::steady_clock::time_point max_blocking_time_point) const
+        std::chrono::steady_clock::time_point max_blocking_time_point)
 {
     if (is_on_same_process_)
     {

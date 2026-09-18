@@ -19,9 +19,15 @@
 #ifndef _SECURITY_ARTIFACTPROVIDERS_PKCS11PROVIDER_HPP_
 #define _SECURITY_ARTIFACTPROVIDERS_PKCS11PROVIDER_HPP_
 
+#include <string>
+
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
 #include <openssl/engine.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#else
+#include <openssl/types.h>
+#endif // if OPENSSL_VERSION_NUMBER < 0x30000000L
 
 #include <rtps/security/exceptions/SecurityException.h>
 
@@ -48,16 +54,13 @@ public:
 
 private:
 
-    EVP_PKEY* load_private_key_impl(
-            X509* certificate,
-            const std::string& file,
-            const std::string& password,
-            SecurityException& exception);
-
     SecurityException initialization_exception_;
     bool has_initialization_error_ = false;
+
+#if !defined(OPENSSL_NO_ENGINE)
     ENGINE* pkcs11_ = nullptr;
     UI_METHOD* ui_method_ = nullptr;
+#endif // !defined(OPENSSL_NO_ENGINE)
 };
 
 } // namespace detail

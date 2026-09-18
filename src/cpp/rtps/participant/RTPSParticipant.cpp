@@ -83,6 +83,14 @@ bool RTPSParticipant::register_writer(
     return mp_impl->register_writer(writer, topic, qos);
 }
 
+dds::ReturnCode_t RTPSParticipant::register_writer(
+        RTPSWriter* rtps_writer,
+        const TopicDescription& topic,
+        const PublicationBuiltinTopicData& pub_builtin_topic_data)
+{
+    return mp_impl->register_writer(rtps_writer, topic, pub_builtin_topic_data);
+}
+
 bool RTPSParticipant::register_reader(
         RTPSReader* reader,
         const TopicDescription& topic,
@@ -90,6 +98,15 @@ bool RTPSParticipant::register_reader(
         const ContentFilterProperty* content_filter)
 {
     return mp_impl->register_reader(reader, topic, qos, content_filter);
+}
+
+dds::ReturnCode_t RTPSParticipant::register_reader(
+        RTPSReader* reader,
+        const TopicDescription& topic,
+        const SubscriptionBuiltinTopicData& sub_builtin_topic_data,
+        const ContentFilterProperty* content_filter)
+{
+    return mp_impl->register_reader(reader, topic, sub_builtin_topic_data, content_filter);
 }
 
 void RTPSParticipant::update_attributes(
@@ -121,6 +138,21 @@ std::vector<std::string> RTPSParticipant::getParticipantNames() const
 const RTPSParticipantAttributes& RTPSParticipant::get_attributes() const
 {
     return mp_impl->get_attributes();
+}
+
+const RTPSParticipantConstantAttributes& RTPSParticipant::get_const_attributes() const
+{
+    return mp_impl->get_const_attributes();
+}
+
+const RTPSParticipantMutableAttributes RTPSParticipant::get_mutable_attributes() const
+{
+    return mp_impl->get_mutable_attributes();
+}
+
+RTPSParticipantAttributes RTPSParticipant::copy_attributes() const
+{
+    return mp_impl->copy_attributes();
 }
 
 uint32_t RTPSParticipant::getMaxMessageSize() const
@@ -298,4 +330,3 @@ bool RTPSParticipant::fill_discovery_data_from_cdr_message(
 } /* namespace rtps */
 } /* namespace fastdds */
 } /* namespace eprosima */
-

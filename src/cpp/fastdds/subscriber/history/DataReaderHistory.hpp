@@ -74,12 +74,14 @@ public:
      * Constructor.
      * Requires information about the DataReader.
      *
-     * @param type  Type information. Needed to know if the type is keyed, as long as the maximum serialized size.
-     * @param topic Topic description. Topic and type name are used on debug messages.
-     * @param qos   DataReaderQoS policy. History related limits are taken from here.
+     * @param type     Type information. Needed to know if the type is keyed, as long as the maximum serialized size.
+     * @param context  Type support context. Used when calling type support methods that require a context.
+     * @param topic    Topic description. Topic and type name are used on debug messages.
+     * @param qos      DataReaderQoS policy. History related limits are taken from here.
      */
     DataReaderHistory(
             const TypeSupport& type,
+            const std::shared_ptr<TopicDataType::Context>& context,
             const TopicDescription& topic,
             const DataReaderQos& qos);
 
@@ -349,7 +351,15 @@ public:
     bool update_instance_nts(
             CacheChange_t* const change);
 
-    void writer_not_alive(
+    /*!
+     * @brief Inform the history that a writer should be considered as not alive.
+     *
+     * @param [in] writer_guid GUID of the writer that should be considered as not alive.
+     *
+     * @return true if a state notification sample was added to at least one instance.
+     *         This would mean that DATA_AVAILABLE status (and listener) shall be notified.
+     */
+    bool writer_not_alive(
             const fastdds::rtps::GUID_t& writer_guid);
 
     void check_and_remove_instance(
@@ -388,7 +398,9 @@ private:
     //!Whether the type has keys
     bool has_keys_;
     //!TopicDataType
-    fastdds::dds::TopicDataType* type_;
+    TopicDataType* type_;
+    //!Context for the TopicDataType
+    std::shared_ptr<TopicDataType::Context> context_;
 
     /// Function to compute the instance handle of a received change
     std::function<bool(CacheChange_t*)> compute_key_for_change_fn_;

@@ -177,12 +177,14 @@ public:
      * @brief Reserve a CacheChange_t.
      *
      * @param [in]  cdr_payload_size  Size of the received payload.
+     * @param [in]  fragment_size     Size of each fragment (0 if not fragmented).
      * @param [out] change            Pointer to the reserved change.
      *
      * @return True if correctly reserved.
      */
     bool reserve_cache(
             uint32_t cdr_payload_size,
+            uint16_t fragment_size,
             fastdds::rtps::CacheChange_t*& change);
 
     /**
@@ -221,14 +223,16 @@ public:
     /**
      * @brief Called after the change has been deserialized.
      *
-     * @param [in] change        Pointer to the change being accessed.
-     * @param [in] writer        Writer proxy the @c change belongs to.
-     * @param [in] mark_as_read  Whether the @c change should be marked as read or not.
+     * @param [in] change          Pointer to the change being accessed.
+     * @param [in] writer          Writer proxy the @c change belongs to.
+     * @param [in] mark_as_read    Whether the @c change should be marked as read or not.
+     * @param [in] should_send_ack Whether an ACKNACK should be sent to the writer or not.
      */
     virtual void end_sample_access_nts(
             fastdds::rtps::CacheChange_t* change,
             fastdds::rtps::WriterProxy*& writer,
-            bool mark_as_read) = 0;
+            bool mark_as_read,
+            bool should_send_ack = false) = 0;
 
     /**
      * @brief A method to update the liveliness changed status of the reader
@@ -247,7 +251,8 @@ public:
      *
      * @param change  Pointer to the incoming CacheChange_t.
      *
-     * @return true if the reader accepts message.
+     * @return true if the reader processed the message.
+     * @return false if the reader could not process the message, but would be able to do so in the future.
      */
     virtual bool process_data_msg(
             fastdds::rtps::CacheChange_t* change) = 0;

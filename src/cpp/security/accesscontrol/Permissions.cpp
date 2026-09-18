@@ -789,14 +789,17 @@ static bool generate_credentials_token(
     {
         try
         {
-            std::ifstream ifs(file.substr(7).c_str());
             Property property;
             property.name("dds.perm.cert");
-            property.value().assign((std::istreambuf_iterator<char>(ifs)),
-                    (std::istreambuf_iterator<char>()));
             property.propagate(true);
+
+            std::ifstream ifs(file.substr(7), std::ios::binary);
+            std::ostringstream oss;
+            oss << ifs.rdbuf();
+            property.value() = oss.str();
+            returned_value = static_cast<bool>(ifs);
+
             token.properties().push_back(std::move(property));
-            returned_value = true;
         }
         catch (std::exception&)
         {
@@ -815,10 +818,10 @@ PermissionsHandle* Permissions::validate_local_permissions(
         Authentication&,
         const IdentityHandle& identity,
         const uint32_t domain_id,
-        const RTPSParticipantAttributes& participant_attr,
+        const PropertyPolicy& part_props,
         SecurityException& exception)
 {
-    PropertyPolicy access_properties = PropertyPolicyHelper::get_properties_with_prefix(participant_attr.properties,
+    PropertyPolicy access_properties = PropertyPolicyHelper::get_properties_with_prefix(part_props,
                     "dds.sec.access.builtin.Access-Permissions.");
 
     if (PropertyPolicyHelper::length(access_properties) == 0)
@@ -1068,7 +1071,6 @@ PermissionsHandle* Permissions::validate_remote_permissions(
 bool Permissions::check_create_participant(
         const PermissionsHandle& local_handle,
         const uint32_t /*domain_id*/,
-        const RTPSParticipantAttributes&,
         SecurityException& exception)
 {
     bool returned_value = false;
@@ -1260,7 +1262,7 @@ bool Permissions::check_remote_datawriter(
 {
     bool returned_value = false;
     const AccessPermissionsHandle& rah = AccessPermissionsHandle::narrow(remote_handle);
-    const char* topic_name = publication_data.topicName().c_str();
+    const char* topic_name = publication_data.topic_name.c_str();
 
     if (rah.nil())
     {
@@ -1282,7 +1284,7 @@ bool Permissions::check_remote_datawriter(
     else
     {
         exception = _SecurityException_(
-            "Not found topic access rule for topic " + publication_data.topicName().to_string());
+            "Not found topic access rule for topic " + publication_data.topic_name.to_string());
         EMERGENCY_SECURITY_LOGGING("Permissions", exception.what());
         return false;
     }
@@ -1293,7 +1295,7 @@ bool Permissions::check_remote_datawriter(
         {
             if (is_topic_in_criterias(topic_name, rule.publishes))
             {
-                returned_value = check_rule(topic_name, rule, publication_data.m_qos.m_partition.getNames(),
+                returned_value = check_rule(topic_name, rule, publication_data.partition.getNames(),
                                 rule.publishes, exception);
                 break;
             }
@@ -1321,7 +1323,7 @@ bool Permissions::check_remote_datareader(
 {
     bool returned_value = false;
     const AccessPermissionsHandle& rah = AccessPermissionsHandle::narrow(remote_handle);
-    const char* topic_name = subscription_data.topicName().c_str();
+    const char* topic_name = subscription_data.topic_name.c_str();
 
     relay_only = false;
 
@@ -1345,7 +1347,7 @@ bool Permissions::check_remote_datareader(
     else
     {
         exception = _SecurityException_(
-            "Not found topic access rule for topic " + subscription_data.topicName().to_string());
+            "Not found topic access rule for topic " + subscription_data.topic_name.to_string());
         EMERGENCY_SECURITY_LOGGING("Permissions", exception.what());
         return false;
     }
@@ -1354,7 +1356,7 @@ bool Permissions::check_remote_datareader(
     {
         if (is_domain_in_set(domain_id, rule.domains))
         {
-            const std::vector<std::string>& partitions = subscription_data.m_qos.m_partition.getNames();
+            const std::vector<std::string>& partitions = subscription_data.partition.getNames();
             if (is_topic_in_criterias(topic_name, rule.subscribes))
             {
                 returned_value = check_rule(topic_name, rule, partitions, rule.subscribes, exception);

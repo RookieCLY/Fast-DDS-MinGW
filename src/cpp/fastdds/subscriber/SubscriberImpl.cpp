@@ -674,17 +674,14 @@ void SubscriberImpl::set_qos(
     if (first_time || !(to.presentation() == from.presentation()))
     {
         to.presentation() = from.presentation();
-        to.presentation().hasChanged = true;
     }
     if (!(to.partition() == from.partition()))
     {
         to.partition() = from.partition();
-        to.partition().hasChanged = true;
     }
     if (to.group_data().getValue() != from.group_data().getValue())
     {
         to.group_data() = from.group_data();
-        to.group_data().hasChanged = true;
     }
     if (to.entity_factory().autoenable_created_entities != from.entity_factory().autoenable_created_entities)
     {
@@ -778,6 +775,41 @@ bool SubscriberImpl::can_be_deleted() const
         }
     }
     return true;
+}
+
+bool SubscriberImpl::can_be_deleted(
+        DataReader* reader) const
+{
+    if (!reader)
+    {
+        EPROSIMA_LOG_ERROR(SUBSCRIBER, "DataReader is nullptr.");
+        return false;
+    }
+
+    if (user_subscriber_ != reader->get_subscriber())
+    {
+        EPROSIMA_LOG_ERROR(SUBSCRIBER, "DataReader does not belong to this Subscriber.");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mtx_readers_);
+    auto it = readers_.find(reader->impl_->get_topicdescription()->get_name());
+
+    if (it != readers_.end())
+    {
+        auto dr_it = std::find(it->second.begin(), it->second.end(), reader->impl_);
+
+        if (dr_it == it->second.end())
+        {
+            EPROSIMA_LOG_ERROR(SUBSCRIBER, "DataReader implementation not found.");
+            return false;
+        }
+
+        return (*dr_it)->can_be_deleted();
+    }
+
+    EPROSIMA_LOG_ERROR(SUBSCRIBER, "DataReader not found.");
+    return false;
 }
 
 #ifdef FASTDDS_STATISTICS

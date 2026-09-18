@@ -60,7 +60,14 @@ public:
             max_samples = history_qos.depth;
             if (topic_kind != NO_KEY)
             {
-                max_samples *= resource_limits_qos.max_instances;
+                if (0 < resource_limits_qos.max_instances)
+                {
+                    max_samples *= resource_limits_qos.max_instances;
+                }
+                else
+                {
+                    max_samples = -1;
+                }
             }
 
             initial_samples = std::min(initial_samples, max_samples);
@@ -87,17 +94,17 @@ public:
     {
         if (resource_limited_qos_.max_samples <= 0)
         {
-            resource_limited_qos_.max_samples = std::numeric_limits<int32_t>::max();
+            resource_limited_qos_.max_samples = -1;
         }
 
         if (resource_limited_qos_.max_instances <= 0)
         {
-            resource_limited_qos_.max_instances = std::numeric_limits<int32_t>::max();
+            resource_limited_qos_.max_instances = -1;
         }
 
         if (resource_limited_qos_.max_samples_per_instance <= 0)
         {
-            resource_limited_qos_.max_samples_per_instance = std::numeric_limits<int32_t>::max();
+            resource_limited_qos_.max_samples_per_instance = -1;
         }
     }
 

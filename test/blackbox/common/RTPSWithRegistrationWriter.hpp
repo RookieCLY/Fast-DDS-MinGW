@@ -51,7 +51,7 @@ public:
     typedef TypeSupport type_support;
     typedef typename type_support::type type;
 
-    using OnReaderDiscoveryFunctor = std::function <void (
+    using OnReaderDiscoveryFunctor = std::function<void (
                         eprosima::fastdds::rtps::ReaderDiscoveryStatus,
                         const eprosima::fastdds::rtps::GUID_t&,
                         const eprosima::fastdds::rtps::SubscriptionBuiltinTopicData*
@@ -110,7 +110,9 @@ public:
 
     RTPSWithRegistrationWriter(
             const std::string& topic_name)
-        : RTPSWithRegistrationWriter(topic_name, nullptr)
+        : RTPSWithRegistrationWriter(
+                topic_name,
+                nullptr)
     {
     }
 
@@ -298,6 +300,33 @@ public:
         return ch;
     }
 
+    eprosima::fastdds::rtps::CacheChange_t* send_sample(
+            type& msg,
+            const eprosima::fastdds::rtps::InstanceHandle_t& handle)
+    {
+        eprosima::fastcdr::CdrSizeCalculator calculator(eprosima::fastdds::rtps::DEFAULT_XCDR_VERSION);
+        size_t current_alignment{ 0 };
+        uint32_t cdr_size = static_cast<uint32_t>(calculator.calculate_serialized_size(msg, current_alignment));
+        eprosima::fastdds::rtps::CacheChange_t* ch = history_->create_change(
+            cdr_size, eprosima::fastdds::rtps::ALIVE, handle);
+
+        eprosima::fastcdr::FastBuffer buffer((char*)ch->serializedPayload.data, ch->serializedPayload.max_size);
+        eprosima::fastcdr::Cdr cdr(buffer, eprosima::fastcdr::Cdr::DEFAULT_ENDIAN,
+                eprosima::fastdds::rtps::DEFAULT_XCDR_VERSION);
+
+        cdr.serialize_encapsulation();
+        cdr << msg;
+
+        ch->serializedPayload.length = static_cast<uint32_t>(cdr.get_serialized_data_length());
+        if (ch->serializedPayload.length > 65000u)
+        {
+            ch->setFragmentSize(65000u);
+        }
+
+        history_->add_change(ch);
+        return ch;
+    }
+
     bool remove_change (
             const eprosima::fastdds::rtps::SequenceNumber_t& sequence_number)
     {
@@ -459,6 +488,13 @@ public:
             const std::string& value)
     {
         writer_attr_.endpoint.properties.properties().emplace_back(prop, value);
+        return *this;
+    }
+
+    RTPSWithRegistrationWriter& add_participant_properties(
+            const eprosima::fastdds::rtps::PropertyPolicy& props)
+    {
+        participant_attr_.properties = props;
         return *this;
     }
 
@@ -666,7 +702,7 @@ private:
     bool initialized_;
     std::mutex mutex_;
     std::condition_variable cv_;
-    uint32_t matched_;
+    std::atomic<uint32_t> matched_;
     eprosima::fastdds::rtps::EntityId_t custom_entity_id_ = eprosima::fastdds::rtps::c_EntityId_Unknown;
     type_support type_;
     std::shared_ptr<eprosima::fastdds::rtps::IPayloadPool> payload_pool_;

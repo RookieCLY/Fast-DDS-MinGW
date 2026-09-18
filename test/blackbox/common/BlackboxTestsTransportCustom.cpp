@@ -14,6 +14,7 @@
 
 #include "BlackboxTests.hpp"
 
+#include <atomic>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -94,7 +95,7 @@ public:
 
         // Call low level transport
         return low_sender_resource->send(buffers, total_bytes, destination_locators_begin,
-                       destination_locators_end, timeout);
+                       destination_locators_end, timeout, 0);
     }
 
     void receive(
@@ -176,6 +177,16 @@ public:
         else
         {
             run_test("", "", "", builtin_transports, builtin_transports_options);
+        }
+    }
+
+    static void test_api_100kb(
+            const BuiltinTransports& builtin_transports,
+            const BuiltinTransportsOptions* const builtin_transports_options = nullptr)
+    {
+        if (builtin_transports != BuiltinTransports::NONE)
+        {
+            run_test_api_100kb(builtin_transports, builtin_transports_options);
         }
     }
 
@@ -302,6 +313,57 @@ private:
         EXPECT_TRUE(writer.waitForAllAcked(std::chrono::seconds(3)));
     }
 
+    static void run_test_api_100kb(
+            const BuiltinTransports& builtin_transports,
+            const BuiltinTransportsOptions* const builtin_transports_options = nullptr)
+    {
+        /* Test configuration */
+        PubSubWriter<Data100kbPubSubType> writer(TEST_TOPIC_NAME);
+        PubSubReader<Data100kbPubSubType> reader(TEST_TOPIC_NAME);
+
+        // Reliable keep all to wait of all acked as end condition
+        writer.reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS)
+                .history_kind(eprosima::fastdds::dds::KEEP_ALL_HISTORY_QOS);
+
+        reader.reliability(eprosima::fastdds::dds::RELIABLE_RELIABILITY_QOS)
+                .history_kind(eprosima::fastdds::dds::KEEP_ALL_HISTORY_QOS);
+
+        // Builtin transport configuration
+        if (builtin_transports_options != nullptr)
+        {
+            writer.setup_transports(builtin_transports, *builtin_transports_options);
+            reader.setup_transports(builtin_transports, *builtin_transports_options);
+        }
+        else
+        {
+            writer.setup_transports(builtin_transports);
+            reader.setup_transports(builtin_transports);
+        }
+
+        /* Run test */
+        // Init writer
+        writer.init();
+        ASSERT_TRUE(writer.isInitialized());
+
+        // Init reader
+        reader.init();
+        ASSERT_TRUE(reader.isInitialized());
+
+        // Wait for discovery
+        writer.wait_discovery();
+        reader.wait_discovery();
+
+        // Send data
+        auto data = default_data100kb_data_generator();
+        reader.startReception(data);
+        writer.send(data);
+        ASSERT_TRUE(data.empty());
+
+        // Wait for reception acknowledgement
+        reader.block_for_all();
+        EXPECT_TRUE(writer.waitForAllAcked(std::chrono::seconds(3)));
+    }
+
     static const std::string env_var_name_;
 };
 
@@ -310,12 +372,12 @@ const std::string BuiltinTransportsTest::env_var_name_ = "FASTDDS_BUILTIN_TRANSP
 
 TEST(ChainingTransportTests, basic_test)
 {
-    bool writer_init_function_called = false;
-    bool writer_receive_function_called = false;
-    bool writer_send_function_called = false;
-    bool reader_init_function_called = false;
-    bool reader_receive_function_called = false;
-    bool reader_send_function_called = false;
+    std::atomic<bool> writer_init_function_called {false};
+    std::atomic<bool> writer_receive_function_called {false};
+    std::atomic<bool> writer_send_function_called {false};
+    std::atomic<bool> reader_init_function_called {false};
+    std::atomic<bool> reader_receive_function_called {false};
+    std::atomic<bool> reader_send_function_called {false};
     eprosima::fastdds::rtps::PropertyPolicy test_property_policy;
     test_property_policy.properties().push_back({test_property_name, test_property_value});
     std::shared_ptr<UDPv4TransportDescriptor> udp_transport = std::make_shared<UDPv4TransportDescriptor>();
@@ -523,6 +585,14 @@ TEST(ChainingTransportTests, builtin_transports_api_shm)
     BuiltinTransportsTest::test_api(BuiltinTransports::SHM);
 }
 
+TEST(ChainingTransportTests, builtin_transports_api_shm_no_frag)
+{
+    BuiltinTransportsOptions options;
+    options.maxMessageSize = 200000;
+    options.sockets_buffer_size = 200000;
+    BuiltinTransportsTest::test_api_100kb(BuiltinTransports::SHM, &options);
+}
+
 TEST(ChainingTransportTests, builtin_transports_api_udpv4)
 {
     BuiltinTransportsTest::test_api(BuiltinTransports::UDPv4);
@@ -576,6 +646,14 @@ TEST(ChainingTransportTests, builtin_transports_api_large_datav6)
     BuiltinTransportsTest::test_api(BuiltinTransports::LARGE_DATAv6);
 }
 #endif // __APPLE__
+
+TEST(ChainingTransportTests, builtin_transports_api_large_data_no_frag)
+{
+    BuiltinTransportsOptions options;
+    options.maxMessageSize = 200000;
+    options.sockets_buffer_size = 200000;
+    BuiltinTransportsTest::test_api_100kb(BuiltinTransports::LARGE_DATA, &options);
+}
 
 TEST(ChainingTransportTests, builtin_transports_env_none)
 {

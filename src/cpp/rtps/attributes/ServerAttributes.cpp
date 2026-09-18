@@ -69,10 +69,24 @@ const std::string& ros_discovery_server_env()
     return servers;
 }
 
-const std::string& easy_mode_env()
+const std::string& ros_easy_mode_env()
 {
     static std::string ip_value;
-    SystemInfo::get_env(EASY_MODE_URI, ip_value);
+    SystemInfo::get_env(ROS2_EASY_MODE_URI, ip_value);
+
+    if (!ip_value.empty())
+    {
+        // Check that the value is a valid IPv4 address
+        if (!IPLocator::isIPv4(ip_value))
+        {
+            EPROSIMA_LOG_WARNING(
+                SERVERATTRIBUTES,
+                "Invalid format: Easy Mode IP must be a valid IPv4 address. "
+                "Ignoring " << ROS2_EASY_MODE_URI << " value.");
+
+            ip_value = "";
+        }
+    }
     return ip_value;
 }
 
@@ -101,7 +115,8 @@ bool load_environment_server_info(
     const static std::regex ROS2_IPV6_ADDRESSPORT_PATTERN(
         R"(^\[?((?:[0-9a-fA-F]{0,4}\:){0,7}[0-9a-fA-F]{0,4})?(?:\])?:?(?:(\d+))?$)");
     // Regex to handle DNS and UDPv4/6 expressions
-    const static std::regex ROS2_DNS_DOMAINPORT_PATTERN(R"(^(UDPv[46]?:\[[\w\.:-]{0,63}\]|[\w\.-]{0,63}):?(?:(\d+))?$)");
+    const static std::regex ROS2_DNS_DOMAINPORT_PATTERN(
+        R"(^(UDPv[46]?:\[[\w\.:-]{0,63}\]|[\w\.-]{0,63}):?(?:(\d+))?$)");
     // Regex to handle TCPv4/6 expressions
     const static std::regex ROS2_DNS_DOMAINPORT_PATTERN_TCP(
         R"(^(TCPv[46]?:\[[\w\.:-]{0,63}\]):?(?:(\d+))?$)");

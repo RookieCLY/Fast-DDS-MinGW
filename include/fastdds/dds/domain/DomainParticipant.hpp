@@ -33,6 +33,7 @@
 #include <fastdds/dds/domain/qos/DomainParticipantQos.hpp>
 #include <fastdds/dds/domain/qos/ReplierQos.hpp>
 #include <fastdds/dds/domain/qos/RequesterQos.hpp>
+#include <fastdds/dds/rpc/ServiceTypeSupport.hpp>
 #include <fastdds/dds/topic/ContentFilteredTopic.hpp>
 #include <fastdds/dds/topic/IContentFilterFactory.hpp>
 #include <fastdds/dds/topic/Topic.hpp>
@@ -55,12 +56,19 @@ class ResourceEvent;
 } // namespace rtps
 
 namespace dds {
+namespace rpc {
+class Replier;
+class Requester;
+class Service;
+} // namespace rpc
 
 class DomainParticipantImpl;
 class DomainParticipantListener;
 class Publisher;
 class PublisherQos;
 class PublisherListener;
+class ReplierQos;
+class RequesterQos;
 class Subscriber;
 class SubscriberQos;
 class SubscriberListener;
@@ -179,12 +187,42 @@ public:
      * Create a Publisher in this Participant.
      *
      * @param qos QoS of the Publisher.
+     * @param [out] ret_code Return code of the operation, RETCODE_OK if the publisher is created, RETCODE_ERROR otherwise.
      * @param listener Pointer to the listener (default: nullptr)
      * @param mask StatusMask that holds statuses the listener responds to (default: all)
      * @return Pointer to the created Publisher.
      */
     FASTDDS_EXPORTED_API Publisher* create_publisher(
             const PublisherQos& qos,
+            ReturnCode_t& ret_code,
+            PublisherListener* listener = nullptr,
+            const StatusMask& mask = StatusMask::all());
+
+    /**
+     * Create a Publisher in this Participant.
+     *
+     * @param qos QoS of the Publisher.
+     * @param listener Pointer to the listener (default: nullptr)
+     * @param mask StatusMask that holds statuses the listener responds to (default: all)
+     * @return Pointer to the created Publisher.
+     */
+    FASTDDS_EXPORTED_API Publisher* create_publisher(
+            const PublisherQos& qos,
+            PublisherListener* listener = nullptr,
+            const StatusMask& mask = StatusMask::all());
+
+    /**
+     * Create a Publisher in this Participant.
+     *
+     * @param profile_name Publisher profile name.
+     * @param [out] ret_code Return code of the operation, RETCODE_OK if the publisher is created, RETCODE_ERROR otherwise.
+     * @param listener Pointer to the listener (default: nullptr)
+     * @param mask StatusMask that holds statuses the listener responds to (default: all)
+     * @return Pointer to the created Publisher.
+     */
+    FASTDDS_EXPORTED_API Publisher* create_publisher_with_profile(
+            const std::string& profile_name,
+            ReturnCode_t& ret_code,
             PublisherListener* listener = nullptr,
             const StatusMask& mask = StatusMask::all());
 
@@ -215,12 +253,42 @@ public:
      * Create a Subscriber in this Participant.
      *
      * @param qos QoS of the Subscriber.
+     * @param [out] ret_code Return code of the operation, RETCODE_OK if the subscriber is created, RETCODE_ERROR otherwise.
      * @param listener Pointer to the listener (default: nullptr)
      * @param mask StatusMask that holds statuses the listener responds to (default: all)
      * @return Pointer to the created Subscriber.
      */
     FASTDDS_EXPORTED_API Subscriber* create_subscriber(
             const SubscriberQos& qos,
+            ReturnCode_t& ret_code,
+            SubscriberListener* listener = nullptr,
+            const StatusMask& mask = StatusMask::all());
+
+    /**
+     * Create a Subscriber in this Participant.
+     *
+     * @param qos QoS of the Subscriber.
+     * @param listener Pointer to the listener (default: nullptr)
+     * @param mask StatusMask that holds statuses the listener responds to (default: all)
+     * @return Pointer to the created Subscriber.
+     */
+    FASTDDS_EXPORTED_API Subscriber* create_subscriber(
+            const SubscriberQos& qos,
+            SubscriberListener* listener = nullptr,
+            const StatusMask& mask = StatusMask::all());
+
+    /**
+     * Create a Subscriber in this Participant.
+     *
+     * @param profile_name Subscriber profile name.
+     * @param [out] ret_code Return code of the operation, RETCODE_OK if the subscriber is created, RETCODE_ERROR otherwise.
+     * @param listener Pointer to the listener (default: nullptr)
+     * @param mask StatusMask that holds statuses the listener responds to (default: all)
+     * @return Pointer to the created Subscriber.
+     */
+    FASTDDS_EXPORTED_API Subscriber* create_subscriber_with_profile(
+            const std::string& profile_name,
+            ReturnCode_t& ret_code,
             SubscriberListener* listener = nullptr,
             const StatusMask& mask = StatusMask::all());
 
@@ -253,6 +321,7 @@ public:
      * @param topic_name Name of the Topic.
      * @param type_name Data type of the Topic.
      * @param qos QoS of the Topic.
+     * @param [out] ret_code Return code of the operation, RETCODE_OK if the topic is created, RETCODE_ERROR otherwise.
      * @param listener Pointer to the listener (default: nullptr)
      * @param mask StatusMask that holds statuses the listener responds to (default: all)
      * @return Pointer to the created Topic.
@@ -261,6 +330,43 @@ public:
             const std::string& topic_name,
             const std::string& type_name,
             const TopicQos& qos,
+            ReturnCode_t& ret_code,
+            TopicListener* listener = nullptr,
+            const StatusMask& mask = StatusMask::all());
+
+    /**
+     * Create a Topic in this Participant.
+     *
+     * @param topic_name Name of the Topic.
+     * @param type_name Data type of the Topic.
+     * @param qos QoS of the Topic.
+     * @param listener Pointer to the listener (default: nullptr)
+     * @param mask StatusMask that holds statuses the listener responds to (default: all)
+     * @return Pointer to the created Topic.
+     */
+    FASTDDS_EXPORTED_API Topic* create_topic(
+            const std::string& topic_name,
+            const std::string& type_name,
+            const TopicQos& qos,
+            TopicListener* listener = nullptr,
+            const StatusMask& mask = StatusMask::all());
+
+    /**
+     * Create a Topic in this Participant.
+     *
+     * @param topic_name Name of the Topic.
+     * @param type_name Data type of the Topic.
+     * @param profile_name Topic profile name.
+     * @param [out] ret_code Return code of the operation, RETCODE_OK if the topic is created, RETCODE_ERROR otherwise.
+     * @param listener Pointer to the listener (default: nullptr)
+     * @param mask StatusMask that holds statuses the listener responds to (default: all)
+     * @return Pointer to the created Topic.
+     */
+    FASTDDS_EXPORTED_API Topic* create_topic_with_profile(
+            const std::string& topic_name,
+            const std::string& type_name,
+            const std::string& profile_name,
+            ReturnCode_t& ret_code,
             TopicListener* listener = nullptr,
             const StatusMask& mask = StatusMask::all());
 
@@ -298,6 +404,27 @@ public:
      * @param related_topic Related Topic to being subscribed
      * @param filter_expression Logic expression to create filter
      * @param expression_parameters Parameters to filter content
+     * @param [out] ret_code Return code of the operation, RETCODE_OK if the ContentFilteredTopic is created, RETCODE_ERROR otherwise.
+     * @return Pointer to the created ContentFilteredTopic.
+     * @return nullptr if @c related_topic does not belong to this participant.
+     * @return nullptr if a topic with the specified @c name has already been created.
+     * @return nullptr if a filter cannot be created with the specified @c filter_expression and
+     *                 @c expression_parameters.
+     */
+    FASTDDS_EXPORTED_API ContentFilteredTopic* create_contentfilteredtopic(
+            const std::string& name,
+            Topic* related_topic,
+            const std::string& filter_expression,
+            const std::vector<std::string>& expression_parameters,
+            ReturnCode_t& ret_code);
+
+    /**
+     * Create a ContentFilteredTopic in this Participant.
+     *
+     * @param name Name of the ContentFilteredTopic
+     * @param related_topic Related Topic to being subscribed
+     * @param filter_expression Logic expression to create filter
+     * @param expression_parameters Parameters to filter content
      * @return Pointer to the created ContentFilteredTopic.
      * @return nullptr if @c related_topic does not belong to this participant.
      * @return nullptr if a topic with the specified @c name has already been created.
@@ -309,6 +436,31 @@ public:
             Topic* related_topic,
             const std::string& filter_expression,
             const std::vector<std::string>& expression_parameters);
+
+    /**
+     * Create a ContentFilteredTopic in this Participant using a custom filter.
+     *
+     * @param name Name of the ContentFilteredTopic
+     * @param related_topic Related Topic to being subscribed
+     * @param filter_expression Logic expression to create filter
+     * @param expression_parameters Parameters to filter content
+     * @param filter_class_name Name of the filter class to use
+     * @param [out] ret_code Return code of the operation, RETCODE_OK if the ContentFilteredTopic is created, RETCODE_ERROR otherwise.
+     *
+     * @return Pointer to the created ContentFilteredTopic.
+     * @return nullptr if @c related_topic does not belong to this participant.
+     * @return nullptr if a topic with the specified @c name has already been created.
+     * @return nullptr if a filter cannot be created with the specified @c filter_expression and
+     *                 @c expression_parameters.
+     * @return nullptr if the specified @c filter_class_name has not been registered.
+     */
+    FASTDDS_EXPORTED_API ContentFilteredTopic* create_contentfilteredtopic(
+            const std::string& name,
+            Topic* related_topic,
+            const std::string& filter_expression,
+            const std::vector<std::string>& expression_parameters,
+            const char* filter_class_name,
+            ReturnCode_t& ret_code);
 
     /**
      * Create a ContentFilteredTopic in this Participant using a custom filter.
@@ -342,6 +494,23 @@ public:
      */
     FASTDDS_EXPORTED_API ReturnCode_t delete_contentfilteredtopic(
             const ContentFilteredTopic* a_contentfilteredtopic);
+
+    /**
+     * Create a MultiTopic in this Participant.
+     *
+     * @param name Name of the MultiTopic
+     * @param type_name Result type of the MultiTopic
+     * @param subscription_expression Logic expression to combine filter
+     * @param expression_parameters Parameters to subscription content
+     * @param [out] ret_code Return code of the operation, RETCODE_OK if the MultiTopic is created, RETCODE_ERROR otherwise.
+     * @return Pointer to the created ContentFilteredTopic, nullptr in error case
+     */
+    FASTDDS_EXPORTED_API MultiTopic* create_multitopic(
+            const std::string& name,
+            const std::string& type_name,
+            const std::string& subscription_expression,
+            const std::vector<std::string>& expression_parameters,
+            ReturnCode_t& ret_code);
 
     /**
      * Create a MultiTopic in this Participant.
@@ -387,6 +556,121 @@ public:
     FASTDDS_EXPORTED_API Topic* find_topic(
             const std::string& topic_name,
             const fastdds::dds::Duration_t& timeout);
+
+    /**
+     * Create an enabled RPC service.
+     *
+     * @param service_name Name of the service.
+     * @param service_type_name Type name of the service (Request & reply types)
+     * @param [out] ret_code Return code indicating the result of the operation.
+     * @return Pointer to the created service. nullptr in error case.
+     */
+    FASTDDS_EXPORTED_API rpc::Service* create_service(
+            const std::string& service_name,
+            const std::string& service_type_name,
+            ReturnCode_t& ret_code);
+
+    /**
+     * Create a RPC service.
+     *
+     * @param service_name Name of the service.
+     * @param service_type_name Type name of the service (Request & reply types)
+     *
+     * @return Pointer to the created service. nullptr in error case.
+     */
+    FASTDDS_EXPORTED_API rpc::Service* create_service(
+            const std::string& service_name,
+            const std::string& service_type_name);
+
+    /**
+     * Find a RPC service by name
+     *
+     * @param service_name Name of the service to search for.
+     * @return Pointer to the service object if found, nullptr if not found.
+     */
+    FASTDDS_EXPORTED_API rpc::Service* find_service(
+            const std::string& service_name) const;
+
+    /**
+     * Delete a registered RPC service
+     *
+     * @param service Pointer to the service to be deleted.
+     * @return RETCODE_OK if the service was deleted, or an specific error code otherwise.
+     */
+    FASTDDS_EXPORTED_API ReturnCode_t delete_service(
+            const rpc::Service* service);
+
+    /**
+     * Create a RPC Requester in a given Service.
+     * @param service Pointer to a service object where the requester will be created.
+     * @param requester_qos QoS of the requester.
+     * @param [out] ret_code Return code indicating the result of the operation.
+     * @return Pointer to the created requester. nullptr in error case.
+     */
+    FASTDDS_EXPORTED_API rpc::Requester* create_service_requester(
+            rpc::Service* service,
+            const RequesterQos& requester_qos,
+            ReturnCode_t& ret_code);
+
+    /**
+     * Create a RPC Requester in a given Service.
+     *
+     * @param service Pointer to a service object where the requester will be created.
+     * @param requester_qos QoS of the requester.
+     *
+     * @return Pointer to the created requester. nullptr in error case.
+     */
+    FASTDDS_EXPORTED_API rpc::Requester* create_service_requester(
+            rpc::Service* service,
+            const RequesterQos& requester_qos);
+
+    /**
+     * Deletes an existing RPC Requester
+     *
+     * @param service_name Name of the service where the requester is created.
+     * @param requester Pointer to the requester to be deleted.
+     * @return RETCODE_OK if the requester was deleted, or an specific error code otherwise.
+     */
+    FASTDDS_EXPORTED_API ReturnCode_t delete_service_requester(
+            const std::string& service_name,
+            rpc::Requester* requester);
+
+    /**
+     * Create a RPC Replier in a given Service.
+     *
+     * @param service Pointer to a service object where the Replier will be created.
+     * @param replier_qos QoS of the replier.
+     * @param [out] ret_code Return code indicating the result of the operation.
+     *
+     * @return Pointer to the created replier. nullptr in error case.
+     */
+    FASTDDS_EXPORTED_API rpc::Replier* create_service_replier(
+            rpc::Service* service,
+            const ReplierQos& replier_qos,
+            ReturnCode_t& ret_code);
+
+    /**
+     * Create a RPC Replier in a given Service. It will override the current service's replier
+     *
+     * @param service Pointer to a service object where the Replier will be created.
+     * @param replier_qos QoS of the replier.
+     *
+     * @return Pointer to the created replier. nullptr in error case.
+     */
+    FASTDDS_EXPORTED_API rpc::Replier* create_service_replier(
+            rpc::Service* service,
+            const ReplierQos& replier_qos);
+
+    /**
+     * Deletes an existing RPC Replier
+     *
+     * @param service_name Name of the service where the replier is created.
+     * @param replier Pointer to the replier to be deleted.
+     * @return RETCODE_OK if the replier was deleted, or an specific error code otherwise.
+     */
+    FASTDDS_EXPORTED_API ReturnCode_t delete_service_replier(
+            const std::string& service_name,
+            rpc::Replier* replier);
 
     /**
      * Looks up an existing, locally created @ref TopicDescription, based on its name.
@@ -1042,11 +1326,40 @@ public:
             const std::string& type_name) const;
 
     /**
+     * Register a service type in this participant.
+     *
+     * @param service_type ServiceTypeSupport.
+     * @param service_type_name The name that will be used to identify the service type.
+     * @return RETCODE_OK if it is correctly registered. Error code otherwise.
+     */
+    FASTDDS_EXPORTED_API ReturnCode_t register_service_type(
+            rpc::ServiceTypeSupport service_type,
+            const std::string& service_type_name);
+
+    /**
+     * Unregister a service type in this participant.
+     *
+     * @param service_type_name Name of the type
+     * @return RETCODE_OK if it is correctly unregistered. Error code otherwise.
+     */
+    FASTDDS_EXPORTED_API ReturnCode_t unregister_service_type(
+            const std::string& service_type_name);
+
+    /**
+     * This method gives access to a registered service type based on its name.
+     *
+     * @param service_type_name Name of the type
+     * @return ServiceTypeSupport corresponding to the service_type_name
+     */
+    FASTDDS_EXPORTED_API rpc::ServiceTypeSupport find_service_type(
+            const std::string& service_type_name) const;
+
+    /**
      * Returns the DomainParticipant's handle.
      *
      * @return InstanceHandle of this DomainParticipant.
      */
-    FASTDDS_EXPORTED_API const InstanceHandle_t& get_instance_handle() const;
+    FASTDDS_EXPORTED_API InstanceHandle_t get_instance_handle() const;
 
     // From here legacy RTPS methods.
 

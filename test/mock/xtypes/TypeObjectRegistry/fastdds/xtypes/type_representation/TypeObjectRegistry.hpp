@@ -27,6 +27,7 @@
 #include <fastdds/dds/xtypes/dynamic_types/DynamicType.hpp>
 #include <fastdds/dds/xtypes/type_representation/ITypeObjectRegistry.hpp>
 #include <fastdds/dds/xtypes/type_representation/TypeObject.hpp>
+#include <fastdds/xtypes/type_representation/TypeIdentifierWithSizeHashSpecialization.h>
 
 namespace std {
 template<>
@@ -68,6 +69,10 @@ public:
     MOCK_METHOD(ReturnCode_t, get_type_object, (
                 const TypeIdentifier& /*type_identifier*/,
                 TypeObject & /*type_object*/), (override));
+
+    MOCK_METHOD(ReturnCode_t, get_complete_type_object, (
+                const TypeIdentifierPair& /*type_identifier*/,
+                CompleteTypeObject & /*type_object*/), (override));
 
     MOCK_METHOD(ReturnCode_t, get_type_objects, (
                 const std::string& /*type_name*/,

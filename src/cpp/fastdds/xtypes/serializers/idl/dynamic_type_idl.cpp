@@ -34,9 +34,10 @@ namespace dds {
 
 using namespace eprosima::utilities::collections;
 
-constexpr auto TYPE_OPENING = "\n{\n";
+constexpr auto TYPE_OPENING = "{\n";
 constexpr auto TYPE_CLOSURE = "};\n";
 constexpr auto TAB_SEPARATOR = "    ";
+constexpr auto MODULE_SEPARATOR = "::";
 
 //////////////////////////
 // DYNAMIC TYPE TO TREE //
@@ -110,8 +111,8 @@ ReturnCode_t dyn_type_to_tree(
             if (RETCODE_OK != ret)
             {
                 EPROSIMA_LOG_ERROR(DYNAMIC_TYPE_IDL,
-                        "Error getting member descriptor of member " << member->get_name() <<
-                        " of " << node << ".");
+                        "Error getting member descriptor of member " << member->get_name()
+                                                                     << " of " << node << ".");
                 return ret;
             }
 
@@ -121,8 +122,8 @@ ReturnCode_t dyn_type_to_tree(
             if (RETCODE_OK != ret)
             {
                 EPROSIMA_LOG_ERROR(DYNAMIC_TYPE_IDL,
-                        "Error building tree of member " << member->get_name() <<
-                        " of " << node << ".");
+                        "Error building tree of member " << member->get_name()
+                                                         << " of " << node << ".");
                 return ret;
             }
 
@@ -213,8 +214,8 @@ ReturnCode_t dyn_type_to_tree(
                 if (RETCODE_OK != ret)
                 {
                     EPROSIMA_LOG_ERROR(DYNAMIC_TYPE_IDL,
-                            "Error getting member descriptor of member " << member->get_name() <<
-                            " of " << node << ".");
+                            "Error getting member descriptor of member " << member->get_name()
+                                                                         << " of " << node << ".");
                     return ret;
                 }
 
@@ -224,8 +225,8 @@ ReturnCode_t dyn_type_to_tree(
                 if (RETCODE_OK != ret)
                 {
                     EPROSIMA_LOG_ERROR(DYNAMIC_TYPE_IDL,
-                            "Error building tree of member " << member->get_name() <<
-                            " of " << node << ".");
+                            "Error building tree of member " << member->get_name()
+                                                             << " of " << node << ".");
                     return ret;
                 }
 
@@ -667,6 +668,10 @@ ReturnCode_t alias_to_idl(
         return ret;
     }
 
+    // Open modules definition (if any) and get type name
+    std::string type_name = node.info.type_kind_name;
+    unsigned int n_modules = open_modules_definition(type_name, idl);
+
     idl << "typedef ";
 
     // Find the base type of the alias
@@ -678,7 +683,10 @@ ReturnCode_t alias_to_idl(
         return ret;
     }
 
-    idl << " " << node.info.type_kind_name << ";\n";
+    idl << " " << type_name << ";\n";
+
+    // Close modules definition (if any)
+    close_modules_definition(n_modules, idl);
 
     return ret;
 }
@@ -706,6 +714,10 @@ ReturnCode_t bitmask_to_idl(
         return RETCODE_BAD_PARAMETER;
     }
 
+    // Open modules definition (if any) and get type name
+    std::string type_name = node.info.type_kind_name;
+    unsigned int n_modules = open_modules_definition(type_name, idl);
+
     // Annotation with the bitmask size
     static constexpr std::uint32_t DEFAULT_BITMASK_SIZE = 32;
     const auto bitmask_size = bounds[0];
@@ -715,7 +727,9 @@ ReturnCode_t bitmask_to_idl(
         idl << "@bit_bound(" << std::to_string(bitmask_size) << ")\n";
     }
 
-    idl << "bitmask " << node.info.type_kind_name << TYPE_OPENING;
+    idl << tabulate_n(n_modules) << "bitmask " << type_name << "\n";
+
+    idl << tabulate_n(n_modules) << TYPE_OPENING;
 
     const auto member_count = node.info.dynamic_type->get_member_count();
 
@@ -732,14 +746,22 @@ ReturnCode_t bitmask_to_idl(
             return ret;
         }
 
-        idl << TAB_SEPARATOR;
+        idl << TAB_SEPARATOR << tabulate_n(n_modules);
 
         // Annotation with the position
-        const auto id = member->get_id();
-
-        if (id != pos)
+        MemberDescriptor::_ref_type member_descriptor {traits<MemberDescriptor>::make_shared()};
+        ret = member->get_descriptor(member_descriptor);
+        if (RETCODE_OK != ret)
         {
-            idl << "@position(" << std::to_string(id) << ") ";
+            EPROSIMA_LOG_ERROR(DYNAMIC_TYPE_IDL, "Error getting member descriptor of " << member->get_name() << ".");
+            return ret;
+        }
+
+        const auto member_pos = member_descriptor->position();
+
+        if (member_pos != pos)
+        {
+            idl << "@position(" << std::to_string(member_pos) << ") ";
         }
 
         idl << member->get_name().to_string();
@@ -753,11 +775,14 @@ ReturnCode_t bitmask_to_idl(
         idl << "\n";
 
         // The position is always sequential
-        pos = id + 1;
+        pos = member_pos + 1;
     }
 
-    // Close definition
-    idl << TYPE_CLOSURE;
+    // Close type definition
+    idl << tabulate_n(n_modules) << TYPE_CLOSURE;
+
+    // Close modules definition (if any)
+    close_modules_definition(n_modules, idl);
 
     return ret;
 }
@@ -770,7 +795,13 @@ ReturnCode_t bitset_to_idl(
 
     ReturnCode_t ret = RETCODE_OK;
 
-    idl << "bitset " << node.info.type_kind_name << TYPE_OPENING;
+    // Open modules definition (if any) and get type name
+    std::string type_name = node.info.type_kind_name;
+    unsigned int n_modules = open_modules_definition(type_name, idl);
+
+    idl << "bitset " << type_name << "\n";
+
+    idl << tabulate_n(n_modules) << TYPE_OPENING;
 
     // Find the bits that each bitfield occupies
     BoundSeq bounds;
@@ -814,10 +845,10 @@ ReturnCode_t bitset_to_idl(
             const auto gap = id - bits_set;
             bits_set += gap;
 
-            idl << TAB_SEPARATOR << "bitfield<" << std::to_string(gap) << ">;\n";
+            idl << tabulate_n(n_modules) << TAB_SEPARATOR << "bitfield<" << std::to_string(gap) << ">;\n";
         }
 
-        idl << TAB_SEPARATOR << "bitfield<" << std::to_string(bounds[index]);
+        idl << tabulate_n(n_modules) << TAB_SEPARATOR << "bitfield<" << std::to_string(bounds[index]);
 
         MemberDescriptor::_ref_type member_descriptor {traits<MemberDescriptor>::make_shared()};
         ret = member->get_descriptor(member_descriptor);
@@ -852,8 +883,11 @@ ReturnCode_t bitset_to_idl(
         bits_set += bounds[index];
     }
 
-    // Close definition
-    idl << TYPE_CLOSURE;
+    // Close type definition
+    idl << tabulate_n(n_modules) << TYPE_CLOSURE;
+
+    // Close modules definition (if any)
+    close_modules_definition(n_modules, idl);
 
     return ret;
 }
@@ -866,7 +900,13 @@ ReturnCode_t enum_to_idl(
 
     ReturnCode_t ret = RETCODE_OK;
 
-    idl << "enum " << node.info.type_kind_name << TYPE_OPENING << TAB_SEPARATOR;
+    // Open modules definition (if any) and get type name
+    std::string type_name = node.info.type_kind_name;
+    unsigned int n_modules = open_modules_definition(type_name, idl);
+
+    idl << "enum " << type_name << "\n";
+
+    idl << tabulate_n(n_modules) << TYPE_OPENING << TAB_SEPARATOR;
 
     for (std::uint32_t index = 0; index < node.info.dynamic_type->get_member_count(); index++)
     {
@@ -879,16 +919,23 @@ ReturnCode_t enum_to_idl(
             return ret;
         }
 
-        if (0 != index)
+        idl << tabulate_n(n_modules) << member->get_name().to_string();
+
+        if (node.info.dynamic_type->get_member_count() - 1 != index)
         {
             idl << ",\n" << TAB_SEPARATOR;
         }
-
-        idl << member->get_name().to_string();
+        else
+        {
+            idl << "\n";
+        }
     }
 
-    // Close definition
-    idl << "\n" << TYPE_CLOSURE;
+    // Close type definition
+    idl << tabulate_n(n_modules) << TYPE_CLOSURE;
+
+    // Close modules definition (if any)
+    close_modules_definition(n_modules, idl);
 
     return ret;
 }
@@ -911,6 +958,10 @@ ReturnCode_t struct_to_idl(
         return ret;
     }
 
+    // Open modules definition (if any) and get type name
+    std::string type_name = node.info.type_kind_name;
+    unsigned int n_modules = open_modules_definition(type_name, idl);
+
     switch (type_descriptor->extensibility_kind())
     {
         case ExtensibilityKind::FINAL:
@@ -925,7 +976,7 @@ ReturnCode_t struct_to_idl(
         }
         case ExtensibilityKind::APPENDABLE:
         {
-            // Appendable is the default extensibility kind
+            idl << "@extensibility(APPENDABLE)\n";
             break;
         }
         default:
@@ -935,8 +986,8 @@ ReturnCode_t struct_to_idl(
         }
     }
 
-    // Add types name
-    idl << "struct " << node.info.type_kind_name;
+    // Add type name
+    idl << tabulate_n(n_modules) << "struct " << type_name;
 
     const auto base_type = type_descriptor->base_type();
 
@@ -955,11 +1006,13 @@ ReturnCode_t struct_to_idl(
         }
     }
 
-    idl << TYPE_OPENING;
+    idl << "\n" << tabulate_n(n_modules) << TYPE_OPENING;
 
     // Add struct attributes
     for (auto const& child : node.branches())
     {
+        idl << tabulate_n(n_modules);
+
         if (child.info.is_base)
         {
             continue;
@@ -970,8 +1023,11 @@ ReturnCode_t struct_to_idl(
         idl << ";\n";
     }
 
-    // Close definition
-    idl << TYPE_CLOSURE;
+    // Close type definition
+    idl << tabulate_n(n_modules) << TYPE_CLOSURE;
+
+    // Close modules definition (if any)
+    close_modules_definition(n_modules, idl);
 
     return ret;
 }
@@ -993,7 +1049,11 @@ ReturnCode_t union_to_idl(
         return ret;
     }
 
-    idl << "union " << node.info.type_kind_name << " switch (";
+    // Open modules definition (if any) and get type name
+    std::string type_name = node.info.type_kind_name;
+    unsigned int n_modules = open_modules_definition(type_name, idl);
+
+    idl << "union " << type_name << " switch (";
 
     ret = type_kind_to_idl(type_descriptor->discriminator_type(), idl);
 
@@ -1002,7 +1062,7 @@ ReturnCode_t union_to_idl(
         return ret;
     }
 
-    idl << ")" << TYPE_OPENING;
+    idl << ")\n" << tabulate_n(n_modules) << TYPE_OPENING;
 
     for (std::uint32_t index = 1; index < node.info.dynamic_type->get_member_count(); index++)
     {
@@ -1022,15 +1082,15 @@ ReturnCode_t union_to_idl(
 
         for (const auto& label : labels)
         {
-            idl << TAB_SEPARATOR << "case " << std::to_string(label) << ":\n";
+            idl << tabulate_n(n_modules) << TAB_SEPARATOR << "case " << std::to_string(label) << ":\n";
         }
 
         if (member_descriptor->is_default_label())
         {
-            idl << TAB_SEPARATOR << "default:\n";
+            idl << tabulate_n(n_modules) << TAB_SEPARATOR << "default:\n";
         }
 
-        idl << TAB_SEPARATOR << TAB_SEPARATOR;
+        idl << TAB_SEPARATOR << TAB_SEPARATOR << tabulate_n(n_modules);
 
         ret = type_kind_to_idl(member_descriptor->type(), idl);
 
@@ -1042,8 +1102,11 @@ ReturnCode_t union_to_idl(
         idl << " " << member->get_name().to_string() << ";\n";
     }
 
-    // Close definition
-    idl << TYPE_CLOSURE;
+    // Close type definition
+    idl << tabulate_n(n_modules) << TYPE_CLOSURE;
+
+    // Close modules definition (if any)
+    close_modules_definition(n_modules, idl);
 
     return ret;
 }
@@ -1080,6 +1143,56 @@ ReturnCode_t node_to_idl(
     }
 
     return RETCODE_OK;
+}
+
+unsigned int open_modules_definition(
+        std::string& type_name,
+        std::ostream& idl) noexcept
+{
+    unsigned int n_modules = 0;
+
+    while (type_name.find(MODULE_SEPARATOR) != std::string::npos)
+    {
+        size_t pos_start = 0;
+        size_t pos_end = type_name.find(MODULE_SEPARATOR);
+
+        std::string module_name = type_name.substr(0, pos_end);
+        type_name.erase(pos_start, pos_end - pos_start + std::strlen(MODULE_SEPARATOR));
+
+        idl << tabulate_n(n_modules) << "module " << module_name << "\n";
+
+        idl << tabulate_n(n_modules) << TYPE_OPENING;
+
+        n_modules++;
+    }
+
+    idl << tabulate_n(n_modules);
+
+    return n_modules;
+}
+
+void close_modules_definition(
+        unsigned int& n_modules,
+        std::ostream& idl) noexcept
+{
+    while (n_modules > 0)
+    {
+        idl << tabulate_n(--n_modules) << TYPE_CLOSURE;
+    }
+}
+
+std::string tabulate_n(
+        const unsigned int& n_tabs) noexcept
+{
+    std::string tabs;
+
+    tabs.reserve(std::strlen(TAB_SEPARATOR) * n_tabs);
+    for (unsigned int i = 0; i < n_tabs; i++)
+    {
+        tabs += TAB_SEPARATOR;
+    }
+
+    return tabs;
 }
 
 ///////////////////////

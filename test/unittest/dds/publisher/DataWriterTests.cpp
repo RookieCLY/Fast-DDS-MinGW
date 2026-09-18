@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -236,6 +237,168 @@ public:
             bool /*force_md5*/) override
     {
         ihandle.value[0] = 1;
+        return true;
+    }
+
+};
+
+// Class to check dispose or unregister operations with non empty payload
+class NonEmptyPayloadInstanceTopicDataTypeMock : public InstanceTopicDataTypeMock
+{
+public:
+
+    uint32_t calculate_serialized_size(
+            const void* const /*data*/,
+            DataRepresentationId_t /*data_representation*/) override
+    {
+        // This has to be > 0 in order to activate another branch in the code
+        return 100;
+    }
+
+};
+
+class ComputeKeyFalseDefinedInstanceDataTypeMock : public InstanceTopicDataTypeMock
+{
+public:
+
+    typedef FooType type;
+
+    ComputeKeyFalseDefinedInstanceDataTypeMock()
+        : InstanceTopicDataTypeMock()
+    {
+        max_serialized_type_size = 4u;
+        is_compute_key_provided = true;
+        set_name("unknowninstancefootype");
+    }
+
+    bool compute_key(
+            fastdds::rtps::SerializedPayload_t& /*payload*/,
+            fastdds::rtps::InstanceHandle_t& ihandle,
+            bool /*force_md5*/) override
+    {
+        // Setting instance as valid
+        ihandle.value[0] = 1;
+        return false;
+    }
+
+    bool compute_key(
+            const void* const /*data*/,
+            fastdds::rtps::InstanceHandle_t& ihandle,
+            bool /*force_md5*/) override
+    {
+        // Setting instance as valid
+        ihandle.value[0] = 1;
+        return false;
+    }
+
+};
+
+
+class ComputeKeyTrueDefinedInstanceDataTypeMock : public InstanceTopicDataTypeMock
+{
+public:
+
+    typedef FooType type;
+
+    ComputeKeyTrueDefinedInstanceDataTypeMock()
+        : InstanceTopicDataTypeMock()
+    {
+        max_serialized_type_size = 4u;
+        is_compute_key_provided = true;
+        set_name("unknowninstancefootype");
+    }
+
+    bool compute_key(
+            fastdds::rtps::SerializedPayload_t& /*payload*/,
+            fastdds::rtps::InstanceHandle_t& ihandle,
+            bool /*force_md5*/) override
+    {
+        // Setting instance as valid
+        ihandle.value[0] = 1;
+        return true;
+    }
+
+    bool compute_key(
+            const void* const /*data*/,
+            fastdds::rtps::InstanceHandle_t& ihandle,
+            bool /*force_md5*/) override
+    {
+        // Setting instance as valid
+        ihandle.value[0] = 1;
+        return true;
+    }
+
+};
+
+
+class ComputeKeyFalseUndefinedInstanceDataTypeMock : public InstanceTopicDataTypeMock
+{
+public:
+
+    typedef FooType type;
+
+    ComputeKeyFalseUndefinedInstanceDataTypeMock()
+        : InstanceTopicDataTypeMock()
+    {
+        max_serialized_type_size = 4u;
+        is_compute_key_provided = true;
+        set_name("unknowninstancefootype");
+    }
+
+    bool compute_key(
+            fastdds::rtps::SerializedPayload_t& /*payload*/,
+            fastdds::rtps::InstanceHandle_t& ihandle,
+            bool /*force_md5*/) override
+    {
+        // Setting instance as invalid
+        ihandle.clear();
+        return false;
+    }
+
+    bool compute_key(
+            const void* const /*data*/,
+            fastdds::rtps::InstanceHandle_t& ihandle,
+            bool /*force_md5*/) override
+    {
+        // Setting instance as invalid
+        ihandle.clear();
+        return false;
+    }
+
+};
+
+
+class ComputeKeyTrueUndefinedInstanceDataTypeMock : public InstanceTopicDataTypeMock
+{
+public:
+
+    typedef FooType type;
+
+    ComputeKeyTrueUndefinedInstanceDataTypeMock()
+        : InstanceTopicDataTypeMock()
+    {
+        max_serialized_type_size = 4u;
+        is_compute_key_provided = true;
+        set_name("unknowninstancefootype");
+    }
+
+    bool compute_key(
+            fastdds::rtps::SerializedPayload_t& /*payload*/,
+            fastdds::rtps::InstanceHandle_t& ihandle,
+            bool /*force_md5*/) override
+    {
+        // Setting instance as invalid
+        ihandle.clear();
+        return true;
+    }
+
+    bool compute_key(
+            const void* const /*data*/,
+            fastdds::rtps::InstanceHandle_t& ihandle,
+            bool /*force_md5*/) override
+    {
+        // Setting instance as invalid
+        ihandle.clear();
         return true;
     }
 
@@ -700,10 +863,12 @@ TEST(DataWriterTests, InvalidQos)
     EXPECT_EQ(inconsistent_code, datawriter->set_qos(qos)); // KEEP LAST 0 is inconsistent
     qos.history().depth = 2;
     EXPECT_EQ(RETCODE_OK, datawriter->set_qos(qos)); // KEEP LAST 2 is OK
-    // KEEP LAST 2000 but max_samples_per_instance default (400) is inconsistent but right now it only shows a warning
-    // This test will fail whenever we enforce the consistency between depth and max_samples_per_instance.
+    // KEEP LAST 2000 and max_samples_per_instance default (UNLIMITED) is consistent.
     qos.history().depth = 2000;
     EXPECT_EQ(RETCODE_OK, datawriter->set_qos(qos));
+    qos.resource_limits().max_samples_per_instance = 1000;
+    // KEEP LAST 2000 and max_samples_per_instance 1000 is inconsistent
+    EXPECT_EQ(inconsistent_code, datawriter->set_qos(qos));
 
     ASSERT_TRUE(publisher->delete_datawriter(datawriter) == RETCODE_OK);
     ASSERT_TRUE(participant->delete_topic(topic) == RETCODE_OK);
@@ -784,9 +949,205 @@ TEST(DataWriterTests, Write)
     data.message("HelloWorld");
     ASSERT_FALSE(datawriter->write(nullptr, HANDLE_NIL) == RETCODE_OK);
     ASSERT_TRUE(datawriter->write(&data, HANDLE_NIL) == RETCODE_OK);
-    ASSERT_TRUE(datawriter->write(&data, participant->get_instance_handle()) ==
+    ASSERT_TRUE(datawriter->write(&data, datawriter->get_instance_handle()) ==
             RETCODE_PRECONDITION_NOT_MET);
 
+    ASSERT_TRUE(publisher->delete_datawriter(datawriter) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_topic(topic) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_publisher(publisher) == RETCODE_OK);
+    ASSERT_TRUE(DomainParticipantFactory::get_instance()->delete_participant(participant) == RETCODE_OK);
+}
+
+TEST(DataWriterTests, write_with_compute_key_true_defined_instance)
+{
+    // Create participant
+    DomainParticipant* participant =
+            DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+    ASSERT_NE(nullptr, participant);
+    // Create publisher
+    Publisher* publisher = participant->create_publisher(PUBLISHER_QOS_DEFAULT);
+    ASSERT_NE(nullptr, publisher);
+    // Register types and topics
+    TypeSupport instance_type(new ComputeKeyTrueDefinedInstanceDataTypeMock());
+    instance_type.register_type(participant);
+    Topic* topic = participant->create_topic("unknowninstancefootopic", instance_type.get_type_name(),
+                    TOPIC_QOS_DEFAULT);
+    ASSERT_NE(topic, nullptr);
+    // Create datawriter
+    DataWriter* datawriter = publisher->create_datawriter(topic, DATAWRITER_QOS_DEFAULT);
+    ASSERT_NE(nullptr, datawriter);
+
+    InstanceHandle_t valid_handle;
+    // Setting this value up automatically makes the instance valid
+    valid_handle.value[0] = 5;
+
+    FooType data;
+    data.message("HelloWorld");
+    fastdds::rtps::WriteParams wp;
+    eprosima::fastdds::dds::Time_t ts{ 0, 1 };
+
+    // Compute key will return true and a defined instance with value 1 (!= valid_handle)
+    ASSERT_TRUE(datawriter->write(&data) == RETCODE_OK);
+    ASSERT_TRUE(datawriter->write(&data, wp) == RETCODE_OK);
+    ASSERT_TRUE(datawriter->write(&data, HANDLE_NIL) == RETCODE_OK);
+    // Fails with valid handle
+    ASSERT_TRUE(datawriter->write(&data, valid_handle) == RETCODE_PRECONDITION_NOT_MET);
+    ASSERT_TRUE(datawriter->write_w_timestamp(&data, valid_handle, ts) == RETCODE_PRECONDITION_NOT_MET);
+
+    valid_handle.clear();
+    instance_type->compute_key(&data, valid_handle);
+    ASSERT_TRUE(datawriter->write(&data, valid_handle) == RETCODE_OK);
+
+    // Cleanup
+    ASSERT_TRUE(publisher->delete_datawriter(datawriter) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_topic(topic) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_publisher(publisher) == RETCODE_OK);
+    ASSERT_TRUE(DomainParticipantFactory::get_instance()->delete_participant(participant) == RETCODE_OK);
+}
+
+TEST(DataWriterTests, write_with_compute_key_true_undefined_instance)
+{
+    // Create participant
+    DomainParticipant* participant =
+            DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+    ASSERT_NE(nullptr, participant);
+    // Create publisher
+    Publisher* publisher = participant->create_publisher(PUBLISHER_QOS_DEFAULT);
+    ASSERT_NE(nullptr, publisher);
+    // Register types and topics
+    TypeSupport instance_type(new ComputeKeyTrueUndefinedInstanceDataTypeMock());
+    instance_type.register_type(participant);
+    Topic* topic = participant->create_topic("unknowninstancefootopic", instance_type.get_type_name(),
+                    TOPIC_QOS_DEFAULT);
+    ASSERT_NE(topic, nullptr);
+    // Create datawriter
+    DataWriter* datawriter = publisher->create_datawriter(topic, DATAWRITER_QOS_DEFAULT);
+    ASSERT_NE(nullptr, datawriter);
+
+    InstanceHandle_t valid_handle;
+    // Setting this value up automatically makes the instance valid
+    valid_handle.value[0] = 5;
+
+    FooType data;
+    data.message("HelloWorld");
+    fastdds::rtps::WriteParams wp;
+    eprosima::fastdds::dds::Time_t ts{ 0, 1 };
+
+    // Compute key will return true but and invalid instance, and it is required
+    ASSERT_TRUE(datawriter->write(&data) == RETCODE_PRECONDITION_NOT_MET);
+    ASSERT_TRUE(datawriter->write(&data, wp) == RETCODE_PRECONDITION_NOT_MET);
+    ASSERT_TRUE(datawriter->write(&data, HANDLE_NIL) == RETCODE_PRECONDITION_NOT_MET);
+    // Fails with valid handle
+    ASSERT_TRUE(datawriter->write(&data, valid_handle) == RETCODE_PRECONDITION_NOT_MET);
+    ASSERT_TRUE(datawriter->write_w_timestamp(&data, valid_handle, ts) == RETCODE_PRECONDITION_NOT_MET);
+
+    valid_handle.clear();
+    valid_handle.value[0] = 1; // Same as computed instance
+    ASSERT_TRUE(valid_handle.isDefined());
+    // Attempt to recompute key to check equality, but compute_key returns invalid instance
+    ASSERT_TRUE(datawriter->write(&data, valid_handle) == RETCODE_PRECONDITION_NOT_MET);
+
+    // Cleanup
+    ASSERT_TRUE(publisher->delete_datawriter(datawriter) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_topic(topic) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_publisher(publisher) == RETCODE_OK);
+    ASSERT_TRUE(DomainParticipantFactory::get_instance()->delete_participant(participant) == RETCODE_OK);
+}
+
+TEST(DataWriterTests, write_with_compute_key_false_defined_instance)
+{
+    // Create participant
+    DomainParticipant* participant =
+            DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+    ASSERT_NE(nullptr, participant);
+    // Create publisher
+    Publisher* publisher = participant->create_publisher(PUBLISHER_QOS_DEFAULT);
+    ASSERT_NE(nullptr, publisher);
+    // Register types and topics
+    TypeSupport instance_type(new ComputeKeyFalseDefinedInstanceDataTypeMock());
+    instance_type.register_type(participant);
+    Topic* topic = participant->create_topic("unknowninstancefootopic", instance_type.get_type_name(),
+                    TOPIC_QOS_DEFAULT);
+    ASSERT_NE(topic, nullptr);
+    // Create datawriter
+    DataWriter* datawriter = publisher->create_datawriter(topic, DATAWRITER_QOS_DEFAULT);
+    ASSERT_NE(nullptr, datawriter);
+
+    InstanceHandle_t valid_handle;
+    // Setting this value up automatically makes the instance valid
+    valid_handle.value[0] = 5;
+    ASSERT_TRUE(valid_handle.isDefined());
+
+    FooType data;
+    data.message("HelloWorld");
+    fastdds::rtps::WriteParams wp;
+    eprosima::fastdds::dds::Time_t ts{ 0, 1 };
+
+    // Compute key will return false and it is required
+    ASSERT_TRUE(datawriter->write(&data) == RETCODE_PRECONDITION_NOT_MET);
+    ASSERT_TRUE(datawriter->write(&data, wp) == RETCODE_PRECONDITION_NOT_MET);
+    ASSERT_TRUE(datawriter->write(&data, HANDLE_NIL) == RETCODE_PRECONDITION_NOT_MET);
+    // Fails with valid handle
+    ASSERT_TRUE(datawriter->write(&data, valid_handle) == RETCODE_PRECONDITION_NOT_MET);
+    ASSERT_TRUE(datawriter->write_w_timestamp(&data, valid_handle, ts) == RETCODE_PRECONDITION_NOT_MET);
+
+    valid_handle.clear();
+    valid_handle.value[0] = 1; // Same as computed instance
+    ASSERT_TRUE(valid_handle.isDefined());
+    // Attempt to recompute key to check equality, but compute_key returns false
+    ASSERT_TRUE(datawriter->write(&data, valid_handle) == RETCODE_PRECONDITION_NOT_MET);
+
+    // Cleanup
+    ASSERT_TRUE(publisher->delete_datawriter(datawriter) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_topic(topic) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_publisher(publisher) == RETCODE_OK);
+    ASSERT_TRUE(DomainParticipantFactory::get_instance()->delete_participant(participant) == RETCODE_OK);
+}
+
+TEST(DataWriterTests, write_with_compute_key_false_undefined_instance)
+{
+    // Create participant
+    DomainParticipant* participant =
+            DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+    ASSERT_NE(nullptr, participant);
+    // Create publisher
+    Publisher* publisher = participant->create_publisher(PUBLISHER_QOS_DEFAULT);
+    ASSERT_NE(nullptr, publisher);
+    // Register types and topics
+    TypeSupport instance_type(new ComputeKeyFalseUndefinedInstanceDataTypeMock());
+    instance_type.register_type(participant);
+    Topic* topic = participant->create_topic("unknowninstancefootopic", instance_type.get_type_name(),
+                    TOPIC_QOS_DEFAULT);
+    ASSERT_NE(topic, nullptr);
+    // Create datawriter
+    DataWriter* datawriter = publisher->create_datawriter(topic, DATAWRITER_QOS_DEFAULT);
+    ASSERT_NE(nullptr, datawriter);
+
+    InstanceHandle_t valid_handle;
+    // Setting this value up automatically makes the instance valid
+    valid_handle.value[0] = 5;
+    ASSERT_TRUE(valid_handle.isDefined());
+
+    FooType data;
+    data.message("HelloWorld");
+    fastdds::rtps::WriteParams wp;
+    eprosima::fastdds::dds::Time_t ts{ 0, 1 };
+
+    // Compute key will return false and it is required
+    ASSERT_TRUE(datawriter->write(&data) == RETCODE_PRECONDITION_NOT_MET);
+    ASSERT_TRUE(datawriter->write(&data, wp) == RETCODE_PRECONDITION_NOT_MET);
+    ASSERT_TRUE(datawriter->write(&data, HANDLE_NIL) == RETCODE_PRECONDITION_NOT_MET);
+    // Fails with valid handle
+    ASSERT_TRUE(datawriter->write(&data, valid_handle) == RETCODE_PRECONDITION_NOT_MET);
+    ASSERT_TRUE(datawriter->write_w_timestamp(&data, valid_handle, ts) == RETCODE_PRECONDITION_NOT_MET);
+
+    valid_handle.clear();
+    valid_handle.value[0] = 1; // Same as computed instance
+    ASSERT_TRUE(valid_handle.isDefined());
+    // Attempt to recompute key to check equality, but compute_key returns false
+    ASSERT_TRUE(datawriter->write(&data, valid_handle) == RETCODE_PRECONDITION_NOT_MET);
+
+    // Cleanup
     ASSERT_TRUE(publisher->delete_datawriter(datawriter) == RETCODE_OK);
     ASSERT_TRUE(participant->delete_topic(topic) == RETCODE_OK);
     ASSERT_TRUE(participant->delete_publisher(publisher) == RETCODE_OK);
@@ -825,7 +1186,7 @@ TEST(DataWriterTests, WriteWithTimestamp)
             datawriter->write_w_timestamp(&data, HANDLE_NIL, fastdds::dds::c_TimeInvalid));
     // 3. Calling write with a wrong instance handle returns RETCODE_PRECONDITION_NOT_MET
     ASSERT_EQ(RETCODE_PRECONDITION_NOT_MET,
-            datawriter->write_w_timestamp(&data, participant->get_instance_handle(), ts));
+            datawriter->write_w_timestamp(&data, datawriter->get_instance_handle(), ts));
     // 4. Correct case
     ASSERT_EQ(RETCODE_OK, datawriter->write_w_timestamp(&data, HANDLE_NIL, ts));
 
@@ -966,6 +1327,49 @@ static void create_writers_for_instance_test(
 }
 
 /**
+ * Create a disabled data writer object for a keyed topic.
+ *
+ * @param [out] instance_datawriter  Pointer to the data writer created for the keyed topic.
+ * @param [out] keyed_type_support   Optionally written with the type support of the keyed topic.
+ */
+static void create_writer_for_non_empty_payload_instance_test(
+        DataWriter*& instance_datawriter,
+        TypeSupport* keyed_type_support = nullptr)
+{
+    // Create participant
+    DomainParticipant* participant =
+            DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+    ASSERT_NE(nullptr, participant);
+
+    // Create publisher
+    PublisherQos pqos = PUBLISHER_QOS_DEFAULT;
+    pqos.entity_factory().autoenable_created_entities = false;
+    Publisher* publisher = participant->create_publisher(pqos);
+    ASSERT_NE(nullptr, publisher);
+
+    // Register types and topics
+    TypeSupport type(new TopicDataTypeMock());
+    type.register_type(participant);
+    TypeSupport instance_type(new NonEmptyPayloadInstanceTopicDataTypeMock());
+    instance_type.register_type(participant);
+
+    Topic* topic = participant->create_topic("footopic", type.get_type_name(), TOPIC_QOS_DEFAULT);
+    ASSERT_NE(topic, nullptr);
+    Topic* instance_topic = participant->create_topic("instancefootopic", instance_type.get_type_name(),
+                    TOPIC_QOS_DEFAULT);
+    ASSERT_NE(instance_topic, nullptr);
+
+    // Create disabled DataWriters
+    instance_datawriter = publisher->create_datawriter(instance_topic, DATAWRITER_QOS_DEFAULT);
+    ASSERT_NE(nullptr, instance_datawriter);
+
+    if (nullptr != keyed_type_support)
+    {
+        *keyed_type_support = instance_type;
+    }
+}
+
+/**
  * This test checks register_instance API
  */
 TEST(DataWriterTests, RegisterInstance)
@@ -1034,7 +1438,7 @@ TEST(DataWriterTests, RegisterInstanceWithTimestamp)
 /**
  * This test checks unregister_instance API
  */
-TEST(DataWriterTests, UnregisterInstance)
+TEST(DataWriterTests, UnregisterInstanceWithoutPayload)
 {
     // Test parameters
     InstanceHandle_t handle;
@@ -1082,9 +1486,51 @@ TEST(DataWriterTests, UnregisterInstance)
 }
 
 /**
+ * This test checks unregister_instance API
+ */
+TEST(DataWriterTests, UnregisterInstanceWithPayload)
+{
+    // Test parameters
+    InstanceHandle_t handle;
+    InstanceFooType data;
+    data.message("HelloWorld");
+
+    // Create disabled DataWriters
+    TypeSupport instance_type;
+    DataWriter* instance_datawriter;
+    create_writer_for_non_empty_payload_instance_test(instance_datawriter, &instance_type);
+
+    // 3. Calling unregister_instance with an invalid sample returns RETCODE_BAD_PARAMETER
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->enable());
+    EXPECT_EQ(RETCODE_BAD_PARAMETER, instance_datawriter->unregister_instance(nullptr, handle));
+
+#if !defined(NDEBUG)
+    // 4. Calling unregister_instance with an inconsistent handle returns RETCODE_PRECONDITION_NOT_MET
+    EXPECT_EQ(RETCODE_PRECONDITION_NOT_MET, instance_datawriter->unregister_instance(&data,
+            instance_datawriter->get_instance_handle()));
+#endif // NDEBUG
+
+    // 5. Calling unregister_instance with a key not yet registered returns RETCODE_PRECONDITION_NOT_MET
+    EXPECT_EQ(RETCODE_PRECONDITION_NOT_MET, instance_datawriter->unregister_instance(&data, handle));
+
+    // 6. Calling unregister_instance with a valid key returns RETCODE_OK
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->write(&data, HANDLE_NIL));
+    EXPECT_EQ(RETCODE_OK, instance_datawriter->unregister_instance(&data, handle));
+
+    // 7. Calling unregister_instance with a valid InstanceHandle also returns RETCODE_OK
+    data.message("HelloWorld_1");
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->write(&data, HANDLE_NIL));
+    instance_type->compute_key(&data, handle);
+    EXPECT_EQ(RETCODE_OK, instance_datawriter->unregister_instance(&data, handle));
+
+    // TODO(jlbueno) There are other possible errors sending the unregister message: RETCODE_OUT_OF_RESOURCES,
+    // RETCODE_ERROR, and RETCODE_TIMEOUT (only if HAVE_STRICT_REALTIME has been defined).
+}
+
+/**
  * This test checks unregister_instance_w_timestamp API
  */
-TEST(DataWriterTests, UnregisterInstanceWithTimestamp)
+TEST(DataWriterTests, UnregisterInstanceWithTimestampAndNoPayload)
 {
     // Test parameters
     InstanceHandle_t handle;
@@ -1146,9 +1592,65 @@ TEST(DataWriterTests, UnregisterInstanceWithTimestamp)
 }
 
 /**
- * This test checks dispose API
+ * This test checks unregister_instance_w_timestamp API
  */
-TEST(DataWriterTests, Dispose)
+TEST(DataWriterTests, UnregisterInstanceWithTimestampAndPayload)
+{
+    // Test parameters
+    InstanceHandle_t handle;
+    InstanceFooType data;
+    data.message("HelloWorld");
+
+    // Create disabled DataWriters
+    TypeSupport instance_type;
+    DataWriter* instance_datawriter;
+    create_writer_for_non_empty_payload_instance_test(instance_datawriter, &instance_type);
+
+    eprosima::fastdds::dds::Time_t ts{ 0, 1 };
+
+    // 3. Calling unregister_instance with an invalid sample returns RETCODE_BAD_PARAMETER
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->enable());
+    EXPECT_EQ(RETCODE_BAD_PARAMETER,
+            instance_datawriter->unregister_instance_w_timestamp(nullptr, handle, ts));
+
+#if !defined(NDEBUG)
+    // 4. Calling unregister_instance with an inconsistent handle returns RETCODE_PRECONDITION_NOT_MET
+    EXPECT_EQ(RETCODE_PRECONDITION_NOT_MET, instance_datawriter->unregister_instance_w_timestamp(&data,
+            instance_datawriter->get_instance_handle(), ts));
+#endif // NDEBUG
+
+    // 5. Calling unregister_instance with a key not yet registered returns RETCODE_PRECONDITION_NOT_MET
+    EXPECT_EQ(RETCODE_PRECONDITION_NOT_MET,
+            instance_datawriter->unregister_instance_w_timestamp(&data, handle, ts));
+
+    // 6. Calling unregister_instance with a valid key returns RETCODE_OK
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->write_w_timestamp(&data, HANDLE_NIL, ts));
+    EXPECT_EQ(RETCODE_OK, instance_datawriter->unregister_instance_w_timestamp(&data, handle, ts));
+
+    // 7. Calling unregister_instance with a valid InstanceHandle also returns RETCODE_OK
+    data.message("HelloWorld_1");
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->write_w_timestamp(&data, HANDLE_NIL, ts));
+    instance_type.compute_key(&data, handle);
+    EXPECT_EQ(RETCODE_OK, instance_datawriter->unregister_instance_w_timestamp(&data, handle, ts));
+
+    // 8. Check invalid timestamps
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->write_w_timestamp(&data, HANDLE_NIL, ts));
+    ts = eprosima::fastdds::dds::c_TimeInfinite;
+    EXPECT_EQ(RETCODE_BAD_PARAMETER,
+            instance_datawriter->unregister_instance_w_timestamp(&data, handle, ts));
+    ts = eprosima::fastdds::dds::c_TimeInvalid;
+    EXPECT_EQ(RETCODE_BAD_PARAMETER,
+            instance_datawriter->unregister_instance_w_timestamp(&data, handle, ts));
+
+    // TODO(jlbueno) There are other possible errors sending the unregister message: RETCODE_OUT_OF_RESOURCES,
+    // RETCODE_ERROR, and RETCODE_TIMEOUT (only if HAVE_STRICT_REALTIME has been defined).
+}
+
+/**
+ * This test checks dispose API when a 0 size payload is sent.
+ * NOTE: InstanceFooType method calculate_serialized_size always returns 0.
+ */
+TEST(DataWriterTests, DisposeWithoutPayload)
 {
     // Test parameters
     InstanceHandle_t handle;
@@ -1196,9 +1698,51 @@ TEST(DataWriterTests, Dispose)
 }
 
 /**
+ * This test checks dispose API when a non-zero size payload is sent.
+ * NOTE: NonEmptyPayloadInstanceFooType method calculate_serialized_size always returns a non-zero value.
+ */
+TEST(DataWriterTests, DisposeWithPayload)
+{
+    // Test parameters
+    InstanceHandle_t handle;
+    InstanceFooType data;
+    data.message("HelloWorld");
+
+    // Create disabled DataWriters
+    TypeSupport instance_type_with_payload;
+    DataWriter* instance_datawriter_with_payload;
+    create_writer_for_non_empty_payload_instance_test(instance_datawriter_with_payload, &instance_type_with_payload);
+
+    // 1. Calling dispose with an invalid sample returns RETCODE_BAD_PARAMETER
+    ASSERT_EQ(RETCODE_OK, instance_datawriter_with_payload->enable());
+    EXPECT_EQ(RETCODE_BAD_PARAMETER, instance_datawriter_with_payload->dispose(nullptr, handle));
+
+#if !defined(NDEBUG)
+    // 4. Calling dispose with an inconsistent handle returns RETCODE_PRECONDITION_NOT_MET
+    EXPECT_EQ(RETCODE_PRECONDITION_NOT_MET, instance_datawriter_with_payload->dispose(&data,
+            instance_datawriter_with_payload->get_instance_handle()));
+#endif // NDEBUG
+
+    // 5. Calling dispose with a key not yet registered returns RETCODE_PRECONDITION_NOT_MET
+    EXPECT_EQ(RETCODE_PRECONDITION_NOT_MET, instance_datawriter_with_payload->dispose(&data, handle));
+
+    // 6. Calling dispose with a valid key returns RETCODE_OK
+    ASSERT_EQ(RETCODE_OK, instance_datawriter_with_payload->write(&data, HANDLE_NIL));
+    EXPECT_EQ(RETCODE_OK, instance_datawriter_with_payload->dispose(&data, handle));
+
+    // 7. Calling dispose with a valid InstanceHandle also returns RETCODE_OK
+    data.message("HelloWorld_1");
+    ASSERT_EQ(RETCODE_OK, instance_datawriter_with_payload->write(&data, HANDLE_NIL));
+    instance_type_with_payload.compute_key(&data, handle);
+    EXPECT_EQ(RETCODE_OK, instance_datawriter_with_payload->dispose(&data, handle));
+    // TODO(jlbueno) There are other possible errors sending the dispose message: RETCODE_OUT_OF_RESOURCES,
+    // RETCODE_ERROR, and RETCODE_TIMEOUT (only if HAVE_STRICT_REALTIME has been defined).
+}
+
+/**
  * This test checks dispose_w_timestamp API
  */
-TEST(DataWriterTests, DisposeWithTimestamp)
+TEST(DataWriterTests, DisposeWithTimestampAndNoPayload)
 {
     // Test parameters
     InstanceHandle_t handle;
@@ -1228,6 +1772,57 @@ TEST(DataWriterTests, DisposeWithTimestamp)
     // 4. Calling dispose with an inconsistent handle returns RETCODE_PRECONDITION_NOT_MET
     EXPECT_EQ(RETCODE_PRECONDITION_NOT_MET, instance_datawriter->dispose_w_timestamp(&data,
             datawriter->get_instance_handle(), ts));
+#endif // NDEBUG
+
+    // 5. Calling dispose with a key not yet registered returns RETCODE_PRECONDITION_NOT_MET
+    EXPECT_EQ(RETCODE_PRECONDITION_NOT_MET, instance_datawriter->dispose_w_timestamp(&data, handle, ts));
+
+    // 6. Calling dispose with a valid key returns RETCODE_OK
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->write_w_timestamp(&data, HANDLE_NIL, ts));
+    EXPECT_EQ(RETCODE_OK, instance_datawriter->dispose_w_timestamp(&data, handle, ts));
+
+    // 7. Calling dispose with a valid InstanceHandle also returns RETCODE_OK
+    data.message("HelloWorld_1");
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->write_w_timestamp(&data, HANDLE_NIL, ts));
+    instance_type.compute_key(&data, handle);
+    EXPECT_EQ(RETCODE_OK, instance_datawriter->dispose_w_timestamp(&data, handle, ts));
+
+    // 8. Check invalid timestamps
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->write_w_timestamp(&data, HANDLE_NIL, ts));
+    ts = eprosima::fastdds::dds::c_TimeInfinite;
+    EXPECT_EQ(RETCODE_BAD_PARAMETER, instance_datawriter->dispose_w_timestamp(&data, handle, ts));
+    ts = eprosima::fastdds::dds::c_TimeInvalid;
+    EXPECT_EQ(RETCODE_BAD_PARAMETER, instance_datawriter->dispose_w_timestamp(&data, handle, ts));
+
+    // TODO(jlbueno) There are other possible errors sending the dispose message: RETCODE_OUT_OF_RESOURCES,
+    // RETCODE_ERROR, and RETCODE_TIMEOUT (only if HAVE_STRICT_REALTIME has been defined).
+}
+
+/**
+ * This test checks dispose_w_timestamp API
+ */
+TEST(DataWriterTests, DisposeWithTimestampAndPayload)
+{
+    // Test parameters
+    InstanceHandle_t handle;
+    InstanceFooType data;
+    data.message("HelloWorld");
+
+    // Create disabled DataWriters
+    TypeSupport instance_type;
+    DataWriter* instance_datawriter;
+    create_writer_for_non_empty_payload_instance_test(instance_datawriter, &instance_type);
+
+    eprosima::fastdds::dds::Time_t ts{ 0, 1 };
+
+    // 3. Calling dispose with an invalid sample returns RETCODE_BAD_PARAMETER
+    ASSERT_EQ(RETCODE_OK, instance_datawriter->enable());
+    EXPECT_EQ(RETCODE_BAD_PARAMETER, instance_datawriter->dispose_w_timestamp(nullptr, handle, ts));
+
+#if !defined(NDEBUG)
+    // 4. Calling dispose with an inconsistent handle returns RETCODE_PRECONDITION_NOT_MET
+    EXPECT_EQ(RETCODE_PRECONDITION_NOT_MET, instance_datawriter->dispose_w_timestamp(&data,
+            instance_datawriter->get_instance_handle(), ts));
 #endif // NDEBUG
 
     // 5. Calling dispose with a key not yet registered returns RETCODE_PRECONDITION_NOT_MET
@@ -1567,27 +2162,43 @@ TEST(DataWriterTests, LoanNegativeTests)
     ASSERT_TRUE(DomainParticipantFactory::get_instance()->delete_participant(participant) == RETCODE_OK);
 }
 
-class DataWriterTest : public DataWriter
-{
-public:
+namespace {
 
-    DataWriterImpl* get_impl() const
+// Accessor to DataWriterImpl from DataWriter
+using DataWriterImplPtr = DataWriterImpl * DataWriter::*;
+
+DataWriterImplPtr get_datawriter_impl_ptr();
+
+template<DataWriterImplPtr P>
+struct DataWriterImplAccessor
+{
+    friend DataWriterImplPtr get_datawriter_impl_ptr()
     {
-        return impl_;
+        return P;
     }
 
 };
 
-class DataWriterImplTest : public DataWriterImpl
-{
-public:
+template struct DataWriterImplAccessor<&DataWriter::impl_>;
 
-    DataWriterHistory* get_history()
+// Accessor to DataWriterHistory unique ptr from DataWriterImpl
+using DataWriterHistoryPtr = std::unique_ptr<DataWriterHistory> DataWriterImpl::*;
+
+DataWriterHistoryPtr get_datawriter_history_ptr();
+
+template<DataWriterHistoryPtr P>
+struct DataWriterHistoryAccessor
+{
+    friend DataWriterHistoryPtr get_datawriter_history_ptr()
     {
-        return history_.get();
+        return P;
     }
 
 };
+
+template struct DataWriterHistoryAccessor<&DataWriterImpl::history_>;
+
+} // namespace
 
 /**
  * This test checks instance wait_for_acknowledgements API
@@ -1650,13 +2261,10 @@ TEST(DataWriterTests, InstanceWaitForAcknowledgement)
 #endif // NDEBUG
 
     // Access DataWriterHistory
-    DataWriterTest* instance_datawriter_test = static_cast<DataWriterTest*>(instance_datawriter);
-    ASSERT_NE(nullptr, instance_datawriter_test);
-    DataWriterImpl* datawriter_impl = instance_datawriter_test->get_impl();
+    DataWriterImpl* datawriter_impl = instance_datawriter->*get_datawriter_impl_ptr();
     ASSERT_NE(nullptr, datawriter_impl);
-    DataWriterImplTest* datawriter_impl_test = static_cast<DataWriterImplTest*>(datawriter_impl);
-    ASSERT_NE(nullptr, datawriter_impl_test);
-    auto history = datawriter_impl_test->get_history();
+    DataWriterHistory* history = (datawriter_impl->*get_datawriter_history_ptr()).get();
+    ASSERT_NE(nullptr, history);
 
     // 5. Calling wait_for_acknowledgments in a keyed topic with HANDLE_NIL returns
     // RETCODE_OK
@@ -2067,10 +2675,10 @@ TEST(DataWriterTests, CustomPoolCreation)
     DomainParticipantFactory::get_instance()->delete_participant(participant);
 }
 
-TEST(DataWriterTests, history_depth_max_samples_per_instance_warning)
+TEST(DataWriterTests, history_depth_max_samples_per_instance_error)
 {
 
-    /* Setup log so it may catch the expected warning */
+    /* Setup log so it may catch the expected error */
     Log::ClearConsumers();
     MockConsumer* mockConsumer = new MockConsumer("RTPS_QOS_CHECK");
     Log::RegisterConsumer(std::unique_ptr<LogConsumer>(mockConsumer));
@@ -2090,14 +2698,14 @@ TEST(DataWriterTests, history_depth_max_samples_per_instance_warning)
     Publisher* publisher = participant->create_publisher(PUBLISHER_QOS_DEFAULT);
     ASSERT_NE(publisher, nullptr);
 
-    /* Create a datawriter with the QoS that should generate a warning */
+    /* Create a datawriter with the QoS that should generate an error */
     DataWriterQos qos;
     qos.history().depth = 10;
     qos.resource_limits().max_samples_per_instance = 5;
     DataWriter* datawriter_1 = publisher->create_datawriter(topic, qos);
-    ASSERT_NE(datawriter_1, nullptr);
+    ASSERT_EQ(datawriter_1, nullptr);
 
-    /* Check that the config generated a warning */
+    /* Check that the config generated an error */
     auto wait_for_log_entries =
             [&mockConsumer](const uint32_t amount, const uint32_t retries, const uint32_t wait_ms) -> size_t
             {
@@ -2119,11 +2727,7 @@ TEST(DataWriterTests, history_depth_max_samples_per_instance_warning)
     const uint32_t wait_ms = 25;
     ASSERT_EQ(wait_for_log_entries(expected_entries, retries, wait_ms), expected_entries);
 
-    /* Check that the datawriter can send data */
-    FooType data;
-    ASSERT_EQ(RETCODE_OK, datawriter_1->write(&data, HANDLE_NIL));
-
-    /* Check that a correctly initialized writer does not produce any warning */
+    /* Check that a correctly initialized writer does not produce any error or warning */
     qos.history().depth = 10;
     qos.resource_limits().max_samples_per_instance = 10;
     DataWriter* datawriter_2 = publisher->create_datawriter(topic, qos);
@@ -2207,6 +2811,156 @@ TEST(DataWriterTests, data_type_is_plain_data_representation)
     /* Tear down */
     participant->delete_contained_entities();
     DomainParticipantFactory::get_instance()->delete_participant(participant);
+}
+
+/**
+ * @test Tests that set_type_support_context returns RETCODE_OK on a disabled DataWriter,
+ *       RETCODE_ILLEGAL_OPERATION on an enabled one.
+ */
+TEST(DataWriterTests, set_type_support_context)
+{
+    DomainParticipant* participant =
+            DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+    ASSERT_NE(participant, nullptr);
+
+    // The DataWriters must start disabled
+    PublisherQos pub_qos = PUBLISHER_QOS_DEFAULT;
+    pub_qos.entity_factory().autoenable_created_entities = false;
+    Publisher* publisher = participant->create_publisher(pub_qos);
+    ASSERT_NE(publisher, nullptr);
+
+    TypeSupport type(new TopicDataTypeMock());
+    type.register_type(participant);
+
+    Topic* topic = participant->create_topic("footopic_ctx", type.get_type_name(), TOPIC_QOS_DEFAULT);
+    ASSERT_NE(topic, nullptr);
+
+    DataWriter* datawriter = publisher->create_datawriter(topic, DATAWRITER_QOS_DEFAULT);
+    ASSERT_NE(datawriter, nullptr);
+
+    auto ctx = std::make_shared<TopicDataType::Context>();
+
+    // Writer is disabled: any context (including null) must return RETCODE_OK
+    EXPECT_EQ(RETCODE_OK, datawriter->set_type_support_context(ctx));
+    EXPECT_EQ(RETCODE_OK, datawriter->set_type_support_context(nullptr));
+
+    // Enable the writer
+    ASSERT_EQ(RETCODE_OK, datawriter->enable());
+
+    // Writer is enabled: must return RETCODE_ILLEGAL_OPERATION
+    EXPECT_EQ(RETCODE_ILLEGAL_OPERATION, datawriter->set_type_support_context(ctx));
+    EXPECT_EQ(RETCODE_ILLEGAL_OPERATION, datawriter->set_type_support_context(nullptr));
+
+    // Tear down
+    ASSERT_TRUE(publisher->delete_datawriter(datawriter) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_topic(topic) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_publisher(publisher) == RETCODE_OK);
+    ASSERT_TRUE(DomainParticipantFactory::get_instance()->delete_participant(participant) == RETCODE_OK);
+}
+
+/*!
+ * This test checks that concurrent set_qos() and get_qos() calls on an enabled DataWriter are race-free.
+ */
+TEST(DataWriterTests, ConcurrentSetQosVsGetQos)
+{
+    DomainParticipant* participant =
+            DomainParticipantFactory::get_instance()->create_participant(0, PARTICIPANT_QOS_DEFAULT);
+    ASSERT_NE(participant, nullptr);
+
+    Publisher* publisher = participant->create_publisher(PUBLISHER_QOS_DEFAULT);
+    ASSERT_NE(publisher, nullptr);
+
+    TypeSupport type(new TopicDataTypeMock());
+    type.register_type(participant);
+
+    Topic* topic = participant->create_topic("footopic_concurrent", type.get_type_name(), TOPIC_QOS_DEFAULT);
+    ASSERT_NE(topic, nullptr);
+
+    DataWriter* datawriter = publisher->create_datawriter(topic, DATAWRITER_QOS_DEFAULT);
+    ASSERT_NE(datawriter, nullptr);
+    ASSERT_TRUE(datawriter->is_enabled());
+
+    // Two valid, mutable QoS configurations that differ in deadline period.
+    DataWriterQos qos_a = DATAWRITER_QOS_DEFAULT;
+    qos_a.deadline().period = eprosima::fastdds::dds::Duration_t(1, 0);
+
+    DataWriterQos qos_b = DATAWRITER_QOS_DEFAULT;
+    qos_b.deadline().period = eprosima::fastdds::dds::Duration_t(2, 0);
+
+    constexpr int kIterations = 5000;
+
+    std::mutex barrier_mutex;
+    std::condition_variable barrier_cv;
+    bool go = false;
+
+    std::atomic<bool> writer_error{false};
+    std::atomic<bool> reader_error{false};
+
+    std::thread writer_thread([&]()
+            {
+                {
+                    std::unique_lock<std::mutex> lk(barrier_mutex);
+                    barrier_cv.wait(lk, [&]
+                    {
+                        return go;
+                    });
+                }
+                for (int i = 0; i < kIterations; ++i)
+                {
+                    const DataWriterQos& qos_to_set = (i % 2 == 0) ? qos_a : qos_b;
+                    if (datawriter->set_qos(qos_to_set) != RETCODE_OK)
+                    {
+                        writer_error.store(true);
+                        break;
+                    }
+                }
+            });
+
+    std::thread reader_thread([&]()
+            {
+                {
+                    std::unique_lock<std::mutex> lk(barrier_mutex);
+                    barrier_cv.wait(lk, [&]
+                    {
+                        return go;
+                    });
+                }
+                DataWriterQos observed;
+                for (int i = 0; i < kIterations; ++i)
+                {
+                    if (datawriter->get_qos(observed) != RETCODE_OK)
+                    {
+                        reader_error.store(true);
+                        break;
+                    }
+                    const eprosima::fastdds::dds::Duration_t& p = observed.deadline().period;
+                    const bool valid = (p == qos_a.deadline().period) ||
+                    (p == qos_b.deadline().period) ||
+                    (p == DATAWRITER_QOS_DEFAULT.deadline().period);
+                    if (!valid)
+                    {
+                        reader_error.store(true);
+                        break;
+                    }
+                }
+            });
+
+    {
+        std::lock_guard<std::mutex> lk(barrier_mutex);
+        go = true;
+    }
+    barrier_cv.notify_all();
+
+    writer_thread.join();
+    reader_thread.join();
+
+    EXPECT_FALSE(writer_error.load()) << "set_qos() returned an unexpected error code during concurrent run";
+    EXPECT_FALSE(reader_error.load()) << "get_qos() returned a torn or unexpected QoS value during concurrent run";
+
+    ASSERT_TRUE(publisher->delete_datawriter(datawriter) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_topic(topic) == RETCODE_OK);
+    ASSERT_TRUE(participant->delete_publisher(publisher) == RETCODE_OK);
+    ASSERT_TRUE(DomainParticipantFactory::get_instance()->delete_participant(participant) == RETCODE_OK);
 }
 
 } // namespace dds

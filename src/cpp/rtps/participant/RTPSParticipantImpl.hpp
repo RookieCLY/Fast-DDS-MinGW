@@ -37,6 +37,7 @@
 #include <unistd.h>
 #endif // if defined(_WIN32)
 
+#include <fastdds/dds/core/ReturnCode.hpp>
 #include <fastdds/rtps/attributes/RTPSParticipantAttributes.hpp>
 #include <fastdds/rtps/builtin/data/ContentFilterProperty.hpp>
 #include <fastdds/rtps/builtin/data/SubscriptionBuiltinTopicData.hpp>
@@ -45,9 +46,11 @@
 #include <fastdds/rtps/common/LocatorList.hpp>
 #include <fastdds/rtps/history/IChangePool.hpp>
 #include <fastdds/rtps/history/IPayloadPool.hpp>
+#include <fastdds/rtps/reader/ReaderDiscoveryStatus.hpp>
 #include <fastdds/rtps/transport/SenderResource.hpp>
+#include <fastdds/rtps/writer/WriterDiscoveryStatus.hpp>
 
-#include "../flowcontrol/FlowControllerFactory.hpp"
+#include <fastdds/types.hpp>
 #include <fastdds/utils/TypePropagation.hpp>
 #include <rtps/builtin/data/ReaderProxyData.hpp>
 #include <rtps/builtin/data/WriterProxyData.hpp>
@@ -95,6 +98,7 @@ namespace rtps {
 
 class BaseReader;
 class BaseWriter;
+class StatefulWriterListener;
 
 } // namespace rtps
 
@@ -115,6 +119,7 @@ namespace rtps {
 
 struct PublicationBuiltinTopicData;
 struct TopicDescription;
+struct RemoteLocatorList;
 class RTPSParticipant;
 class RTPSParticipantListener;
 class BuiltinProtocols;
@@ -140,8 +145,8 @@ class WLP;
  * @ingroup RTPS_MODULE
  */
 class RTPSParticipantImpl
-    : public fastdds::statistics::StatisticsParticipantImpl,
-    public fastdds::statistics::rtps::IConnectionsQueryable
+    : public fastdds::statistics::StatisticsParticipantImpl
+    , public fastdds::statistics::rtps::IConnectionsQueryable
 #if HAVE_SECURITY
     , private security::SecurityPluginFactory
 #endif // if HAVE_SECURITY
@@ -153,7 +158,7 @@ class RTPSParticipantImpl
        -A ReceiverResource (as produced by the NetworkFactory Element)
        -Its associated MessageReceiver
      */
-    typedef struct ReceiverControlBlock
+    struct ReceiverControlBlock
     {
         std::shared_ptr<ReceiverResource> Receiver;
         MessageReceiver* mp_receiver;                  //Associated Readers/Writers inside of MessageReceiver
@@ -189,7 +194,7 @@ class RTPSParticipantImpl
         const ReceiverControlBlock& operator =(
                 const ReceiverControlBlock&) = delete;
 
-    } ReceiverControlBlock;
+    };
 
 public:
 
@@ -294,6 +299,7 @@ public:
      * @param destination_locators_begin Iterator at the first destination locator.
      * @param destination_locators_end Iterator at the end destination locator.
      * @param max_blocking_time_point execution time limit timepoint.
+     * @param transport_priority Transport priority of the message.
      * @return true if at least one locator has been sent.
      */
     template<class LocatorIteratorT>
@@ -303,7 +309,8 @@ public:
             const GUID_t& sender_guid,
             const LocatorIteratorT& destination_locators_begin,
             const LocatorIteratorT& destination_locators_end,
-            std::chrono::steady_clock::time_point& max_blocking_time_point)
+            std::chrono::steady_clock::time_point& max_blocking_time_point,
+            int32_t transport_priority)
     {
         bool ret_code = false;
 #if HAVE_STRICT_REALTIME
@@ -320,7 +327,7 @@ public:
                 LocatorIteratorT locators_begin = destination_locators_begin;
                 LocatorIteratorT locators_end = destination_locators_end;
                 send_resource->send(buffers, total_bytes, &locators_begin, &locators_end,
-                        max_blocking_time_point);
+                        max_blocking_time_point, transport_priority);
             }
 
             lock.unlock();
@@ -512,7 +519,7 @@ public:
     std::unique_ptr<RTPSMessageGroup_t> get_send_buffer(
             const std::chrono::steady_clock::time_point& max_blocking_time);
     void return_send_buffer(
-            std::unique_ptr <RTPSMessageGroup_t>&& buffer);
+            std::unique_ptr<RTPSMessageGroup_t>&& buffer);
 
     uint32_t get_domain_id() const;
 
@@ -545,14 +552,74 @@ public:
         return initialized_;
     }
 
-private:
+    /**
+     * @brief Notify reader discovery event.
+     *
+     * Will be called when a remote reader is discovered, updated or removed.
+     * Will call the user listener if set.
+     *
+     * @param reason Discovery reason.
+     * @param info Information about the discovered reader.
+     */
+    virtual void notify_reader_discovery(
+            ReaderDiscoveryStatus reason,
+            const SubscriptionBuiltinTopicData& info);
+
+    /**
+     * @brief Notify reader discovery event.
+     *
+     * Will be called when a remote reader is discovered, updated or removed.
+     * Will call the specified listener.
+     *
+     * @param reason Discovery reason.
+     * @param info Information about the discovered reader.
+     * @param listener Listener to be notified.
+     */
+    virtual void notify_reader_discovery(
+            ReaderDiscoveryStatus reason,
+            const SubscriptionBuiltinTopicData& info,
+            RTPSParticipantListener* listener);
+
+    /**
+     * @brief Notify writer discovery event.
+     *
+     * Will be called when a remote writer is discovered, updated or removed.
+     * Will call the user listener if set.
+     *
+     * @param reason Discovery reason.
+     * @param info Information about the discovered writer.
+     */
+    virtual void notify_writer_discovery(
+            WriterDiscoveryStatus reason,
+            const PublicationBuiltinTopicData& info);
+
+    /**
+     * @brief Notify writer discovery event.
+     *
+     * Will be called when a remote writer is discovered, updated or removed.
+     * Will call the specified listener.
+     *
+     * @param reason Discovery reason.
+     * @param info Information about the discovered writer.
+     * @param listener Listener to be notified.
+     */
+    virtual void notify_writer_discovery(
+            WriterDiscoveryStatus reason,
+            const PublicationBuiltinTopicData& info,
+            RTPSParticipantListener* listener);
+
+protected:
 
     //! DomainId
     uint32_t domain_id_;
     //!Attributes of the RTPSParticipant
     RTPSParticipantAttributes m_att;
+    //!Constant copy of Attributes of the RTPSParticipant
+    RTPSParticipantConstantAttributes m_const_att;
     //! Metatraffic unicast port used by default on this participant
     uint32_t metatraffic_unicast_port_ = 0;
+    //! Default unicast port used by default on this participant
+    uint32_t default_unicast_port_ = 0;
     //!Guid of the RTPSParticipant.
     GUID_t m_guid;
     //! String containing the RTPSParticipant Guid.
@@ -571,7 +638,6 @@ private:
     std::vector<BaseWriter*> m_allWriterList;
     //!Reader List
     std::vector<BaseReader*> m_allReaderList;
-    //!Listen thread list.
     //!Writer List.
     std::vector<BaseWriter*> m_userWriterList;
     //!Reader List
@@ -584,6 +650,8 @@ private:
     std::unique_ptr<SendBuffersManager> send_buffers_;
     //! Maximum number of bytes allowed for an RTPS datagram generated by this writer.
     uint32_t max_output_message_size_ = std::numeric_limits<uint32_t>::max();
+    //! The stateful writer listener for congestion control
+    StatefulWriterListener* stateful_writer_listener_ = nullptr;
 
     /**
      * Client override flag: SIMPLE participant that has been overriden with the environment variable and transformed
@@ -618,12 +686,43 @@ private:
     //! Determine if the RTPSParticipantImpl was initialized successfully.
     bool initialized_ = false;
 
+    //! Whether the participant should send optional QoS in the discovery
+    //! This is regulated by the `fastdds.send_optional_qos` property
+    mutable signed char should_send_optional_qos_ = -1;
+
     //! Ignored entities collections
     std::set<GuidPrefix_t> ignored_participants_;
     std::set<GUID_t> ignored_writers_;
     std::set<GUID_t> ignored_readers_;
     //! Protect ignored entities collection concurrent access
     mutable shared_mutex ignored_mtx_;
+    //! Participant Mutex
+    mutable std::mutex mutex_;
+
+    //! Will this participant use intraprocess only?
+    bool is_intraprocess_only_;
+
+#ifdef FASTDDS_STATISTICS
+    std::unique_ptr<fastdds::statistics::rtps::MonitorService> monitor_server_;
+    std::unique_ptr<fastdds::statistics::rtps::SimpleQueryable> simple_queryable_;
+    std::atomic<const fastdds::statistics::rtps::IConnectionsObserver*> conns_observer_;
+#endif // ifdef FASTDDS_STATISTICS
+
+    /*
+     * Flow controller factory.
+     */
+    FlowControllerFactoryType flow_controller_factory_;
+
+#if HAVE_SECURITY
+    security::ParticipantSecurityAttributes security_attributes_;
+#endif // if HAVE_SECURITY
+
+    //! Indicates whether the participant has shared-memory transport
+    bool has_shm_transport_;
+
+    bool match_local_endpoints_ = true;
+
+private:
 
     void setup_guids(
             const GuidPrefix_t& persistence_guid);
@@ -723,30 +822,6 @@ private:
     void normalize_endpoint_locators(
             EndpointAttributes& endpoint_att);
 
-    //! Participant Mutex
-    mutable std::mutex mutex_;
-
-    //!Will this participant use intraprocess only?
-    bool is_intraprocess_only_;
-
-#ifdef FASTDDS_STATISTICS
-    std::unique_ptr<fastdds::statistics::rtps::MonitorService> monitor_server_;
-    std::unique_ptr<fastdds::statistics::rtps::SimpleQueryable> simple_queryable_;
-    std::atomic<const fastdds::statistics::rtps::IConnectionsObserver*> conns_observer_;
-#endif // ifdef FASTDDS_STATISTICS
-
-    /*
-     * Flow controller factory.
-     */
-    FlowControllerFactory flow_controller_factory_;
-
-#if HAVE_SECURITY
-    security::ParticipantSecurityAttributes security_attributes_;
-#endif // if HAVE_SECURITY
-
-    //! Indicates whether the participant has shared-memory transport
-    bool has_shm_transport_;
-
     /**
      * Get persistence service from factory, using endpoint attributes (or participant
      * attributes if endpoint does not define a persistence service config)
@@ -815,14 +890,45 @@ private:
     void get_default_unicast_locators(
             RTPSParticipantAttributes& att);
 
-    bool match_local_endpoints_ = true;
-
     bool should_match_local_endpoints(
             const RTPSParticipantAttributes& att);
 
 public:
 
+    FASTDDS_TODO_BEFORE(4, 0,
+            "Make RTPSParticipantAttributes a composition of RTPSParticipantConstantAttributes and RTPSParticipantMutableAttributes");
+    /**
+     * @brief Get the RTPSParticipantAttributes of this RTPSParticipantImpl. This method is not thread safe,
+     * it is recommended to use copy_attributes() instead.
+     * @return RTPSParticipantAttributes of this RTPSParticipantImpl.
+     */
     const RTPSParticipantAttributes& get_attributes() const;
+
+    FASTDDS_TODO_BEFORE(4, 0,
+            "Make RTPSParticipantAttributes a composition of RTPSParticipantConstantAttributes and RTPSParticipantMutableAttributes");
+    /**
+     * @brief Get a const reference of RTPSParticipantConstantAttributes of this RTPSParticipantImpl.
+     * This method is thread safe because it returns a const reference to the internal constant attributes.
+     * @return A const reference to the RTPSParticipantConstantAttributes of this RTPSParticipantImpl.
+     */
+    const RTPSParticipantConstantAttributes& get_const_attributes() const;
+
+    FASTDDS_TODO_BEFORE(4, 0,
+            "Make RTPSParticipantAttributes a composition of RTPSParticipantConstantAttributes and RTPSParticipantMutableAttributes");
+    /**
+     * @brief Get a const copy of RTPSParticipantMutableAttributes of this RTPSParticipantImpl.
+     * This method is thread safe because it returns a const copy of the internal mutable attributes.
+     * @return A const copy of the RTPSParticipantMutableAttributes of this RTPSParticipantImpl.
+     */
+    const RTPSParticipantMutableAttributes get_mutable_attributes() const;
+
+    FASTDDS_TODO_BEFORE(4, 0,
+            "Make RTPSParticipantAttributes a composition of RTPSParticipantConstantAttributes and RTPSParticipantMutableAttributes");
+    /**
+     * @brief Get a copy of the RTPSParticipantAttributes of this RTPSParticipantImpl in a thread safe manner.
+     * @return A copy of the RTPSParticipantAttributes of this RTPSParticipantImpl.
+     */
+    RTPSParticipantAttributes copy_attributes() const;
 
     /**
      * Create a Writer in this RTPSParticipant.
@@ -834,7 +940,7 @@ public:
      * @param isBuiltin Bool value indicating if the Writer is builtin (Discovery or Liveliness protocol) or is created for the end user.
      * @return True if the Writer was correctly created.
      */
-    bool createWriter(
+    virtual bool createWriter(
             RTPSWriter** Writer,
             WriterAttributes& param,
             WriterHistory* hist,
@@ -854,7 +960,7 @@ public:
      *
      * @return True if the Writer was correctly created.
      */
-    bool create_writer(
+    virtual bool create_writer(
             RTPSWriter** Writer,
             WriterAttributes& watt,
             WriterHistory* hist,
@@ -873,7 +979,7 @@ public:
      * @param enable Whether the reader should be automatically enabled.
      * @return True if the Reader was correctly created.
      */
-    bool createReader(
+    virtual bool createReader(
             RTPSReader** Reader,
             ReaderAttributes& param,
             ReaderHistory* hist,
@@ -894,7 +1000,7 @@ public:
      * @param enable Whether the reader should be automatically enabled.
      * @return True if the Reader was correctly created.
      */
-    bool createReader(
+    virtual bool createReader(
             RTPSReader** Reader,
             ReaderAttributes& param,
             const std::shared_ptr<IPayloadPool>& payload_pool,
@@ -925,6 +1031,20 @@ public:
             const fastdds::dds::WriterQos& qos);
 
     /**
+     * Register a Writer in the BuiltinProtocols.
+     *
+     * @param Writer                  Pointer to the RTPSWriter.
+     * @param topic                   Information regarding the topic where the writer is registering.
+     * @param pub_builtin_topic_data  Information on the publication endpoint.
+     *
+     * @return OK if correctly registered, ERROR otherwise.
+     */
+    dds::ReturnCode_t register_writer(
+            RTPSWriter* Writer,
+            const TopicDescription& topic,
+            const PublicationBuiltinTopicData& pub_builtin_topic_data);
+
+    /**
      * Register a Reader in the BuiltinProtocols.
      *
      * @param Reader          Pointer to the RTPSReader.
@@ -941,10 +1061,38 @@ public:
             const ContentFilterProperty* content_filter = nullptr);
 
     /**
+     * Register a Reader in the BuiltinProtocols.
+     *
+     * @param Reader                  Pointer to the RTPSReader.
+     * @param topic                   Information regarding the topic where the reader is registering.
+     * @param sub_builtin_topic_data  Information on the subscription endpoint.
+     * @param content_filter          Optional content filtering information.
+     *
+     * @return OK if correctly registered, ERROR otherwise.
+     */
+    dds::ReturnCode_t register_reader(
+            RTPSReader* Reader,
+            const TopicDescription& topic,
+            const SubscriptionBuiltinTopicData& sub_builtin_topic_data,
+            const ContentFilterProperty* content_filter = nullptr);
+
+    /**
+     * Check if the property @parameter_serialize_optional_qos is set to enable the sent of optional QoS.
+     */
+    bool should_send_optional_qos() const;
+
+    /**
      * Update participant attributes.
      * @param patt New participant attributes.
      */
     void update_attributes(
+            const RTPSParticipantAttributes& patt);
+
+    /**
+     * Update only mutable participant attributes.
+     * @param patt New participant attributes.
+     */
+    void update_mutable_attributes(
             const RTPSParticipantAttributes& patt);
 
     /**
@@ -1044,6 +1192,10 @@ public:
 
     void createSenderResources(
             const Locator_t& locator);
+
+    void createSenderResources(
+            const RemoteLocatorList& locator_list,
+            const EndpointAttributes& param);
 
     /**
      * Creates sender resources for the given locator selector entry by calling the NetworkFactory's
@@ -1146,7 +1298,7 @@ public:
             SubscriptionBuiltinTopicData& data,
             const GUID_t& reader_guid) const;
 
-    template <EndpointKind_t kind, octet no_key, octet with_key>
+    template<EndpointKind_t kind, octet no_key, octet with_key>
     static bool preprocess_endpoint_attributes(
             const EntityId_t& entity_id,
             std::atomic<uint32_t>& id_count,

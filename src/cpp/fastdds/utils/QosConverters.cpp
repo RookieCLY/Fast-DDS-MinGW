@@ -63,6 +63,7 @@ void set_qos_from_attributes(
     qos.resource_limits() = attr.topic.resourceLimitsQos;
     qos.data_sharing() = attr.qos.data_sharing;
     qos.reliable_writer_qos().disable_heartbeat_piggyback = attr.qos.disable_heartbeat_piggyback;
+    qos.transport_priority().value = attr.qos.transport_priority.value;
 
     if (attr.qos.m_partition.size() > 0 )
     {
@@ -148,6 +149,7 @@ void set_qos_from_attributes(
     qos.wire_protocol().default_multicast_locator_list = attr.defaultMulticastLocatorList;
     qos.wire_protocol().default_external_unicast_locators = attr.default_external_unicast_locators;
     qos.wire_protocol().ignore_non_matching_locators = attr.ignore_non_matching_locators;
+    qos.wire_protocol().easy_mode(attr.easy_mode_ip);
     qos.transport().user_transports = attr.userTransports;
     qos.transport().use_builtin_transports = attr.useBuiltinTransports;
     qos.transport().send_socket_buffer_size = attr.sendSocketBufferSize;
@@ -198,6 +200,7 @@ void set_attributes_from_qos(
     attr.setName(qos.name());
     attr.prefix = qos.wire_protocol().prefix;
     attr.participantID = qos.wire_protocol().participant_id;
+    attr.easy_mode_ip = qos.wire_protocol().easy_mode();
     attr.builtin = qos.wire_protocol().builtin;
     attr.port = qos.wire_protocol().port;
     attr.defaultUnicastLocatorList = qos.wire_protocol().default_unicast_locator_list;
